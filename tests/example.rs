@@ -12,13 +12,13 @@ use sqlx::{
 #[derive(Clone)]
 pub struct App {
   db: PgPool,
-  default_alias_for_persons: String,
+  default_alias: String,
 }
 
 impl App {
-  async fn new(connection_string: &str, default_alias_for_persons: String) -> Self {
+  async fn new(connection_string: &str, default_alias: String) -> Self {
     let db = PgPoolOptions::new().connect(connection_string).await.unwrap();
-    Self{db, default_alias_for_persons}
+    Self{db, default_alias}
   } 
 }
 
@@ -40,6 +40,12 @@ make_sqlx_model!{
   },
   queries {
     guiness_height_with_alias("(height_in_meters < 0.3 OR height_in_meters > 2.4) AND alias = $1::varchar", alias: String),
+  }
+}
+
+impl Person {
+  fn alias_or_default<'a>(&'a self) -> &'a str {
+    self.attrs.alias.as_ref().unwrap_or(&self.state.default_alias)
   }
 }
 
@@ -77,9 +83,9 @@ fn persons_crud() {
     // of attributes say from reading a JSON or using Default::default(),
     // you can set them all at once using the use_attrs method, which receives a NewPersonAttrs struct.
     
-    impl Default for NewPersonAttrs {
+    impl Default for InsertPerson {
       fn default() -> Self {
-        NewPersonAttrs{
+        InsertPerson{
           name: "Anonymous".to_string(),
           alias: Default::default(),
           height_in_meters: Default::default(),
@@ -89,9 +95,11 @@ fn persons_crud() {
       }
     }
 
+    let insert_person = Default::default();
+
     let other_person = app.person()
       .build()
-      .use_attrs(Default::default())
+      .use_struct(insert_person)
       .agreed_to_terms(Some(true))
       .save().await
       .unwrap();
@@ -105,6 +113,8 @@ fn persons_crud() {
       agreed_to_terms: Some(true),
     });
 
+    assert_eq!(other_person.alias_or_default(), "wacho");
+
     // We define which fields are searchable, and a statically checked (yet very long) SQL
     // query is created.
     // Each model has its own Query type, like PersonQuery, where all fields are optional
@@ -113,29 +123,42 @@ fn persons_crud() {
     // These filters are mostly for fetching relationships and simple state machines.
     // Fall back to sqlx if this is not enough.
 
-    let everyone = app.person().query().all().await.unwrap();
+    let everyone = app.person().select().all().await.unwrap();
     assert_eq!(everyone, vec![person.clone(), other_person.clone()]);
 
-    let people_with_aliases = app.person().query().alias_is_set(true).all().await.unwrap();
+    let people_with_aliases = app.person().select().alias_is_set(true).all().await.unwrap();
     assert_eq!(people_with_aliases, vec![person.clone()]);
 
-    let people_called_anon = app.person().query().name_eq(&"Anonymous".to_string()).all().await.unwrap();
+    let people_called_anon = app.person().select().name_eq(&"Anonymous".to_string()).all().await.unwrap();
     assert_eq!(people_called_anon, vec![other_person.clone()]);
 
-    let someone_specific = app.person().query().id_eq(&person_id).one().await.unwrap();
+    let someone_specific = app.person().select().id_eq(&person_id).one().await.unwrap();
     assert_eq!(someone_specific, person.clone());
 
-    let non_existing = app.person().query().id_eq(&123456).optional().await.unwrap();
+    let non_existing = app.person().select().id_eq(&123456).optional().await.unwrap();
     assert!(non_existing.is_none());
 
-    let backwards = app.person().query().order_by(PersonQueryOrderBy::id).desc().all().await.unwrap();
+    let backwards = app.person().select().order_by(PersonOrderBy::Id).desc().all().await.unwrap();
     assert_eq!(backwards, vec![other_person.clone(), person.clone()]);
 
-    let limited = app.person().query().order_by(PersonQueryOrderBy::id).desc().limit(1).all().await.unwrap();
+    let limited = app.person().select().order_by(PersonOrderBy::Id).desc().limit(1).all().await.unwrap();
     assert_eq!(limited, vec![other_person.clone()]);
 
-    let offset = app.person().query().order_by(PersonQueryOrderBy::id).desc().limit(1).offset(1).all().await.unwrap();
+    let offset = app.person().select().order_by(PersonOrderBy::Id).desc().limit(1).offset(1).all().await.unwrap();
     assert_eq!(offset, vec![person.clone()]);
+
+    // At any point, a struct can be used to populate all the search criteria at once.
+    let from_struct = app.person().select()
+      .use_struct(SelectPerson{
+        limit: Some(1),
+        offset: None,
+        desc: true,
+        order_by: Some(PersonOrderBy::Id),
+        ..Default::default()
+      })
+      .offset(1) // It's possible to keep chaining, these values will override the previous value for that field.
+      .all().await.unwrap();
+    assert_eq!(from_struct, vec![person.clone()]);
 
     // Custom queries can be used directly on the hub.
     let guiness_height = app.person().guiness_height_with_alias("wairi".to_string()).one().await.unwrap();
@@ -145,7 +168,6 @@ fn persons_crud() {
     assert_eq!(guiness_height_all, vec![person.clone()]);
 
     assert!(app.person().guiness_height_with_alias("nobody".to_string()).optional().await.unwrap().is_none());
-
 
     // Update can be done field by field with the builder.
     // Optional/Nullable fields are received as Some(_), and can be set to null again with None.
@@ -157,7 +179,7 @@ fn persons_crud() {
     assert_eq!(updated.attrs.agreed_to_terms, None);
 
     let other_updated = other_person.update()
-      .use_attrs(PersonUpdaterAttrs{
+      .use_struct(UpdatePerson{
         alias: Some(Some("Anon".to_string())),
         height_in_meters: Some(Decimal::new(176, 2)),
         ..Default::default()
@@ -170,7 +192,7 @@ fn persons_crud() {
     assert_eq!(other_updated.attrs.agreed_to_terms, Some(true));
 
     // And finally, you can delete things.
-    //updated.delete().await.unwrap();
-    //assert!(app.person().query().id_eq(&person_id).optional().await.unwrap().is_none());
+    updated.delete().await.unwrap();
+    assert!(app.person().select().id_eq(&person_id).optional().await.unwrap().is_none());
   });
 }

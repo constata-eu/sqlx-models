@@ -8,6 +8,7 @@ edition = "2018"
 [dependencies]
 syn = { version = "*", features = ["extra-traits", "full"] }
 quote = "*"
+convert_case = "*"
 
 [dev-dependencies]
 tokio = { version = "1.2.0", features = ["full"] }
