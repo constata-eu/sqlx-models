@@ -206,6 +206,12 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
       pub fn new(state: #state_name, attrs: #attrs_struct) -> Self {
         Self{ state, attrs }
       }
+
+      #(
+        pub fn #field_idents<'a>(&'a self) -> &'a #field_types {
+          &self.attrs.#field_idents
+        }
+      )*
     }
     
     impl PartialEq for #struct_name {

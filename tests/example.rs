@@ -70,6 +70,11 @@ fn persons_crud() {
 
     let person_id = person.attrs.id;
 
+    // All fields have a reader.
+    assert_eq!(person.id(), &1);
+    assert_eq!(person.name(), "Alan Brito Delgado");
+
+    // The struct with all the attributes is also public.
     assert_eq!(person.attrs, PersonAttrs{
       id: 1,
       name: "Alan Brito Delgado".to_string(),
@@ -113,6 +118,7 @@ fn persons_crud() {
       agreed_to_terms: Some(true),
     });
 
+    // The custom method we implemented in Person works like this.
     assert_eq!(other_person.alias_or_default(), "wacho");
 
     // We define which fields are searchable, and a statically checked (yet very long) SQL
@@ -175,9 +181,9 @@ fn persons_crud() {
       .name("Zacarias Flores".to_string())
       .agreed_to_terms(None)
       .save().await.unwrap();
-    assert_eq!(updated.attrs.name, "Zacarias Flores");
-    assert_eq!(updated.attrs.agreed_to_terms, None);
-    assert_eq!(updated.attrs.alias, Some("wairi".to_string()); // Untouched attributes stay the same.
+    assert_eq!(updated.name(), "Zacarias Flores");
+    assert_eq!(updated.agreed_to_terms(), &None);
+    assert_eq!(updated.alias(), &Some("wairi".to_string())); // Untouched attributes stay the same.
 
     let other_updated = other_person.update()
       .use_struct(UpdatePerson{
@@ -188,9 +194,9 @@ fn persons_crud() {
       .agreed_to_terms(Some(true))
       .save().await.unwrap();
 
-    assert_eq!(other_updated.attrs.alias, Some("Anon".to_string()));
-    assert_eq!(other_updated.attrs.height_in_meters, Decimal::new(176,2));
-    assert_eq!(other_updated.attrs.agreed_to_terms, Some(true));
+    assert_eq!(other_updated.alias(), &Some("Anon".to_string()));
+    assert_eq!(other_updated.height_in_meters(), &Decimal::new(176,2));
+    assert_eq!(other_updated.agreed_to_terms(), &Some(true));
 
     // And finally, you can delete things.
     updated.delete().await.unwrap();
