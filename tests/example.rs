@@ -177,6 +177,7 @@ fn persons_crud() {
       .save().await.unwrap();
     assert_eq!(updated.attrs.name, "Zacarias Flores");
     assert_eq!(updated.attrs.agreed_to_terms, None);
+    assert_eq!(updated.attrs.alias, Some("wairi".to_string()); // Untouched attributes stay the same.
 
     let other_updated = other_person.update()
       .use_struct(UpdatePerson{
