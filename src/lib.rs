@@ -563,7 +563,7 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
 
   quote!{
     impl #hub_struct {
-      pub fn build(&self) -> #insert_struct {
+      pub fn insert(&self) -> #insert_struct {
         #insert_struct::new(self.state.clone())
       }
     }

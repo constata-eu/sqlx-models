@@ -59,7 +59,7 @@ fn persons_crud() {
 
     // You can build a new resource and save it.
     let person = app.person()
-      .build()
+      .insert()
       .name("Alan Brito Delgado".to_string())
       .alias(Some("wairi".to_string()))
       .height_in_meters(Decimal::new(270,2))
@@ -103,7 +103,7 @@ fn persons_crud() {
     let insert_person = Default::default();
 
     let other_person = app.person()
-      .build()
+      .insert()
       .use_struct(insert_person)
       .agreed_to_terms(Some(true))
       .save().await
