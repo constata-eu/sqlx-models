@@ -1,4 +1,5 @@
 use sqlx_models_derive::make_sqlx_model;
+use serde_with::{serde_as, DisplayFromStr};
 use sqlx::{
   types::Decimal,
   postgres::{PgPool, PgPoolOptions}
@@ -25,18 +26,22 @@ impl App {
 make_sqlx_model!{
   state: App,
   table: persons,
-  Person {
-    #[sqlx_search_as int4]
+  #[serde_as]
+  struct Person {
+    #[sqlx_search_as(int4)]
     id: i32,
-    #[sqlx_search_as varchar]
+    #[sqlx_search_as(varchar)]
     name: String,
-    #[sqlx_search_as varchar]
+    #[sqlx_search_as(varchar)]
     alias: Option<String>,
-    #[sqlx_search_as decimal]
+    #[sqlx_search_as(decimal)]
     height_in_meters: Decimal,
-    #[sqlx_search_as boolean]
+    #[sqlx_search_as(boolean)]
     has_drivers_license: bool,
     agreed_to_terms: Option<bool>,
+    #[serde_as(as = "DisplayFromStr")]
+    #[sqlx_search_as(int4)]
+    stringified_field: i32,
   },
   queries {
     guiness_height_with_alias("(height_in_meters < 0.3 OR height_in_meters > 2.4) AND alias = $1::varchar", alias: String),
@@ -65,6 +70,7 @@ fn persons_crud() {
       .height_in_meters(Decimal::new(270,2))
       .has_drivers_license(true)
       .agreed_to_terms(Some(true))
+      .stringified_field(10)
       .save().await
       .unwrap();
 
@@ -82,6 +88,7 @@ fn persons_crud() {
       height_in_meters: Decimal::new(270,2),
       has_drivers_license: true,
       agreed_to_terms: Some(true),
+      stringified_field: 10,
     });
 
     // If you want compile-time guarantees, or if you construct your full list
@@ -96,6 +103,7 @@ fn persons_crud() {
           height_in_meters: Default::default(),
           has_drivers_license: Default::default(),
           agreed_to_terms: Default::default(),
+          stringified_field: 0,
         }
       }
     }
@@ -116,6 +124,7 @@ fn persons_crud() {
       height_in_meters: Decimal::ZERO,
       has_drivers_license: false,
       agreed_to_terms: Some(true),
+      stringified_field: 0,
     });
 
     // The custom method we implemented in Person works like this.
@@ -123,7 +132,7 @@ fn persons_crud() {
 
     // We define which fields are searchable, and a statically checked (yet very long) SQL
     // query is created.
-    // Each model has its own Query type, like PersonQuery, where all fields are optional
+    // Each model has its own Select type, like SelectPerson, where all fields are optional
     // and named after the type of search that we want to perform.
     // You can chain and specify multiple criteria, all conditions will be ANDed.
     // These filters are mostly for fetching relationships and simple state machines.
@@ -201,5 +210,20 @@ fn persons_crud() {
     // And finally, you can delete things.
     updated.delete().await.unwrap();
     assert!(app.person().select().id_eq(&person_id).optional().await.unwrap().is_none());
+
+    // The extra attributes for the attrs structure, in this case those from serde-derive, were honored.
+    let json_repr = r#"{"id":2,"name":"Anonymous","alias":"Anon","height_in_meters":"1.7600","has_drivers_license":false,"agreed_to_terms":true,"stringified_field":"0"}"#;
+
+    assert_eq!(serde_json::to_string(&other_updated).unwrap(), json_repr);
+
+    serde_json::from_str::<InsertPerson>(r#"{
+      "name":"Anonymous",
+      "alias":"Anon",
+      "height_in_meters":"1.7600",
+      "has_drivers_license":false,
+      "agreed_to_terms":true,
+      "stringified_field":"0"
+    }"#).expect("Person to be parseable");
+
   });
 }

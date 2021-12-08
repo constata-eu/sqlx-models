@@ -5,8 +5,8 @@ use syn::__private::TokenStream2;
 use syn::{
   parse_macro_input,
   parse_str,
+  Attribute,
   Ident,
-  FieldsNamed,
   Field,
   Type,
   TypePath,
@@ -17,7 +17,9 @@ use syn::{
   braced,
   parenthesized,
   BareFnArg,
-  LitStr
+  LitStr,
+  Fields,
+  ItemStruct,
 };
 use syn::parse::{Parse, ParseStream, Result};
 use quote::{quote, format_ident};
@@ -50,6 +52,7 @@ impl Parse for Query {
 #[derive(Debug)]
 struct SqlxModelConf {
   struct_name: Ident,
+  extra_struct_attributes: Vec<Attribute>,
   attrs_struct: Ident,
   state_name: Ident,
   table_name: Ident,
@@ -61,6 +64,7 @@ struct SqlxModelConf {
   field_idents: Vec<Ident>,
   field_idents_except_id: Vec<Ident>,
   field_types_except_id: Vec<Type>,
+  field_attrs_except_id: Vec<Vec<Attribute>>,
 }
 
 impl Parse for SqlxModelConf {
@@ -73,8 +77,14 @@ impl Parse for SqlxModelConf {
     input.parse::<Token![:]>()?;
     let table_name: Ident = input.parse()?;
     input.parse::<Token![,]>()?;
-    let struct_name: Ident = input.parse()?;
-    let named_fields: FieldsNamed = input.parse()?;
+    let whole_struct: ItemStruct = input.parse()?;
+
+    let struct_name: Ident = whole_struct.ident.clone();
+    let named_fields = match whole_struct.fields.clone() {
+      Fields::Named(x) => x,
+      _ => panic!("Struct needs named fields"),
+    };
+
     let mut queries: Punctuated<Query, Comma> = Punctuated::new();
     if input.parse::<Token![,]>().is_ok() {
       let _ = input.parse::<kw::queries>()?;
@@ -82,6 +92,8 @@ impl Parse for SqlxModelConf {
       braced!(content in input);
       queries = content.parse_terminated(Query::parse)?;
     }
+
+    let extra_struct_attributes = whole_struct.attrs.clone();
 
     let attrs_struct = format_ident!("{}Attrs", &struct_name);
 
@@ -101,13 +113,20 @@ impl Parse for SqlxModelConf {
       .filter(|i| i.ident.as_ref().unwrap() != "id" )
       .collect();
 
+    let field_attrs_except_id: Vec<Vec<Attribute>> = fields_except_id.clone().into_iter().map(|field|{
+      field.attrs.into_iter()
+        .filter(|a| a.path != parse_str("sqlx_search_as").unwrap() )
+        .collect::<Vec<Attribute>>()
+    }).collect();
+
     let field_idents_except_id: Vec<Ident> = fields_except_id.clone().into_iter()
       .map(|i| i.ident.unwrap() ).collect();
-    
+
     let field_types_except_id: Vec<Type> = fields_except_id.clone().into_iter()
       .map(|i| i.ty ).collect();
 
     Ok(SqlxModelConf{
+      extra_struct_attributes,
       state_name,
       struct_name,
       attrs_struct,
@@ -120,6 +139,7 @@ impl Parse for SqlxModelConf {
       field_idents,
       field_idents_except_id,
       field_types_except_id,
+      field_attrs_except_id,
     })
   }
 }
@@ -182,10 +202,16 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
   let hub_struct = &conf.hub_struct;
   let attrs_struct = &conf.attrs_struct;
   let field_idents = &conf.field_idents;
-
+  let extra_struct_attributes = &conf.extra_struct_attributes;
   let struct_name_as_string = LitStr::new(&struct_name.to_string(), struct_name.span());
   let field_types: Vec<Type> = conf.fields.clone().into_iter()
     .map(|i| i.ty ).collect();
+
+  let field_attrs: Vec<Vec<Attribute>> = conf.fields.clone().into_iter().map(|field|{
+    field.attrs.into_iter()
+      .filter(|a| a.path != parse_str("sqlx_search_as").unwrap() )
+      .collect::<Vec<Attribute>>()
+  }).collect();
 
   quote!{
     impl #hub_struct {
@@ -220,9 +246,13 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
       }
     }
 
+    #(#extra_struct_attributes)*
     #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct #attrs_struct {
-      #(pub #field_idents: #field_types,)*
+      #(
+        #(#field_attrs)*
+        pub #field_idents: #field_types,
+      )*
     }
 
     impl std::fmt::Debug for #struct_name {
@@ -272,7 +302,7 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
     let ident = &field.ident.as_ref().unwrap();
 
     field.attrs.iter().filter(|a| a.path == parse_str("sqlx_search_as").unwrap() ).next().map(|found|{
-      let db_type = format!("{}", found.tokens);
+      let db_type = format!("{}", found.parse_args::<Ident>().expect("Arguments for sqlx_search_as"));
       let base_field_pos = args.len() + 1;
 
       let eq_field_ident = format_ident!("{}_eq", ident);
@@ -537,6 +567,8 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
   let attrs_struct = &conf.attrs_struct;
   let field_idents_except_id = &conf.field_idents_except_id;
   let field_types_except_id = &conf.field_types_except_id;
+  let field_attrs_except_id = &conf.field_attrs_except_id;
+  let extra_struct_attributes = &conf.extra_struct_attributes;
 
   let field_idents_except_id_as_string: Vec<LitStr> = field_idents_except_id.iter()
     .map(|i| LitStr::new(&i.to_string(), i.span()) ).collect();
@@ -622,9 +654,13 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
       }
     }
 
+    #(#extra_struct_attributes)*
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
     pub struct #insert_attrs_struct {
-      #(pub #field_idents_except_id: #field_types_except_id,)*
+      #(
+        #(#field_attrs_except_id)*
+        pub #field_idents_except_id: #field_types_except_id,
+      )*
     }
   }
 }
@@ -720,9 +756,9 @@ fn build_update(conf: &SqlxModelConf) -> TokenStream2 {
       }
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
     pub struct #update_attrs_struct {
-      #(pub #field_idents_except_id: Option<#field_types_except_id>,)*
+      #( pub #field_idents_except_id: Option<#field_types_except_id>,)*
     }
   }
 }

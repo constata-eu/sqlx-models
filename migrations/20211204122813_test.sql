@@ -4,6 +4,7 @@ CREATE TABLE persons  (
   alias VARCHAR,
   height_in_meters DECIMAL NOT NULL,
   has_drivers_license BOOLEAN NOT NULL,
-  agreed_to_terms BOOLEAN
+  agreed_to_terms BOOLEAN,
+  stringified_field INTEGER
 );
 
