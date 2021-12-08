@@ -624,7 +624,7 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
 
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
     pub struct #insert_attrs_struct {
-      #(#field_idents_except_id: #field_types_except_id,)*
+      #(pub #field_idents_except_id: #field_types_except_id,)*
     }
   }
 }
