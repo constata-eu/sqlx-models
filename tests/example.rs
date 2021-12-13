@@ -141,7 +141,7 @@ fn persons_crud() {
     let everyone = app.person().select().all().await.unwrap();
     assert_eq!(everyone, vec![person.clone(), other_person.clone()]);
 
-    let people_with_aliases = app.person().select().alias_is_set(true).all().await.unwrap();
+    let people_with_aliases = app.person().select().alias_is_set(true).one().await.unwrap();
     assert_eq!(people_with_aliases, vec![person.clone()]);
 
     let people_called_anon = app.person().select().name_eq(&"Anonymous".to_string()).all().await.unwrap();
@@ -209,7 +209,7 @@ fn persons_crud() {
 
     // And finally, you can delete things.
     updated.delete().await.unwrap();
-    assert!(app.person().select().id_eq(&person_id).optional().await.unwrap().is_none());
+    assert!(app.person().find_optional(&person_id).await.unwrap().is_none());
 
     // The extra attributes for the attrs structure, in this case those from serde-derive, were honored.
     let json_repr = r#"{"id":2,"name":"Anonymous","alias":"Anon","height_in_meters":"1.7600","has_drivers_license":false,"agreed_to_terms":true,"stringified_field":"0"}"#;

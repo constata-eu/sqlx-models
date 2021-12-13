@@ -51,6 +51,7 @@ impl Parse for Query {
 
 #[derive(Debug)]
 struct SqlxModelConf {
+  id_type: Type,
   struct_name: Ident,
   extra_struct_attributes: Vec<Attribute>,
   attrs_struct: Ident,
@@ -65,6 +66,7 @@ struct SqlxModelConf {
   field_idents_except_id: Vec<Ident>,
   field_types_except_id: Vec<Type>,
   field_attrs_except_id: Vec<Vec<Attribute>>,
+  hub_builder_method: Ident,
 }
 
 impl Parse for SqlxModelConf {
@@ -125,7 +127,15 @@ impl Parse for SqlxModelConf {
     let field_types_except_id: Vec<Type> = fields_except_id.clone().into_iter()
       .map(|i| i.ty ).collect();
 
+    let id_type = fields.iter()
+      .filter(|i| i.ident.as_ref().unwrap() == "id" )
+      .next().expect("struct to have an id field")
+      .ty.clone();
+
+    let hub_builder_method = Ident::new(&struct_name.to_string().to_case(Case::Snake), struct_name.span());
+
     Ok(SqlxModelConf{
+      id_type,
       extra_struct_attributes,
       state_name,
       struct_name,
@@ -140,6 +150,7 @@ impl Parse for SqlxModelConf {
       field_idents_except_id,
       field_types_except_id,
       field_attrs_except_id,
+      hub_builder_method,
     })
   }
 }
@@ -149,7 +160,7 @@ pub fn make_sqlx_model(tokens: TokenStream) -> TokenStream {
   let conf = parse_macro_input!(tokens as SqlxModelConf);
   let state_name = &conf.state_name;
   let hub_struct = &conf.hub_struct;
-  let hub_builder_method = Ident::new(&conf.struct_name.to_string().to_lowercase(), conf.struct_name.span());
+  let hub_builder_method = &conf.hub_builder_method;
 
   let base_section = build_base(&conf);
   let select_section = build_select(&conf);
@@ -203,6 +214,7 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
   let attrs_struct = &conf.attrs_struct;
   let field_idents = &conf.field_idents;
   let extra_struct_attributes = &conf.extra_struct_attributes;
+  let hub_builder_method = &conf.hub_builder_method;
   let struct_name_as_string = LitStr::new(&struct_name.to_string(), struct_name.span());
   let field_types: Vec<Type> = conf.fields.clone().into_iter()
     .map(|i| i.ty ).collect();
@@ -231,6 +243,12 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
     impl #struct_name {
       pub fn new(state: #state_name, attrs: #attrs_struct) -> Self {
         Self{ state, attrs }
+      }
+
+      pub async fn reload(&mut self) -> sqlx::Result<()> {
+        let new = self.state.#hub_builder_method().select().id_eq(&self.attrs.id).one().await?;
+        self.attrs = new.attrs;
+        Ok(())
       }
 
       #(
@@ -275,6 +293,7 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
   let select_struct = format_ident!("Select{}Hub", &struct_name);
   let order_by_enum = format_ident!("{}OrderBy", &struct_name);
   let select_attrs_struct = format_ident!("Select{}", &struct_name);
+  let id_type = &conf.id_type;
   let span = conf.struct_name.span().clone();
 
   let mut eq_idents: Vec<Ident> = vec![];
@@ -369,6 +388,14 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
     impl #hub_struct {
       pub fn select(&self) -> #select_struct {
         #select_struct::new(self.state.clone())
+      }
+
+      pub async fn find(&self, id: &#id_type) -> sqlx::Result<#struct_name> {
+        self.select().id_eq(&id).one().await
+      }
+
+      pub async fn find_optional(&self, id: &#id_type) -> sqlx::Result<Option<#struct_name>> {
+        self.select().id_eq(&id).optional().await
       }
     }
 
@@ -674,6 +701,7 @@ fn build_update(conf: &SqlxModelConf) -> TokenStream2 {
   let fields_except_id = &conf.fields_except_id;
   let field_idents_except_id = &conf.field_idents_except_id;
   let field_types_except_id = &conf.field_types_except_id;
+  let id_type = &conf.id_type;
 
   let update_struct = format_ident!("Update{}Hub", &struct_name);
   let update_attrs_struct = format_ident!("Update{}", &struct_name);
@@ -724,11 +752,11 @@ fn build_update(conf: &SqlxModelConf) -> TokenStream2 {
     pub struct #update_struct {
       pub state: #state_name,
       pub attrs: #update_attrs_struct,
-      pub id: i32,
+      pub id: #id_type,
     }
 
     impl #update_struct {
-      pub fn new(state: #state_name, id: i32) -> Self {
+      pub fn new(state: #state_name, id: #id_type) -> Self {
         Self{ state, id, attrs: Default::default() }
       }
 
