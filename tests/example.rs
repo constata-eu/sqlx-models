@@ -141,7 +141,7 @@ fn persons_crud() {
     let everyone = app.person().select().all().await.unwrap();
     assert_eq!(everyone, vec![person.clone(), other_person.clone()]);
 
-    let people_with_aliases = app.person().select().alias_is_set(true).one().await.unwrap();
+    let people_with_aliases = app.person().select().alias_is_set(true).all().await.unwrap();
     assert_eq!(people_with_aliases, vec![person.clone()]);
 
     let people_called_anon = app.person().select().name_eq(&"Anonymous".to_string()).all().await.unwrap();

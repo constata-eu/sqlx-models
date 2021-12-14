@@ -532,8 +532,8 @@ fn build_queries(conf: &SqlxModelConf) -> Vec<TokenStream2> {
     let method_name = q.method_name.clone();
     let sql = q.sql.clone();
     let args = q.args.clone();
-    let arg_names: Punctuated<Ident, Comma> = q.args.iter().map(|i| i.name.clone().unwrap().0 ).collect();
-    let args_types: Vec<Type> = q.args.iter().map(|i| i.ty.clone() ).collect();
+    let arg_names: Vec<Ident> = q.args.iter().map(|i| i.name.clone().unwrap().0 ).collect();
+    let arg_types: Vec<Type> = q.args.iter().map(|i| i.ty.clone() ).collect();
     let query_struct_name = Ident::new(&method_name.to_string().to_case(Case::UpperCamel), q.method_name.span().clone());
 
     let query = LitStr::new(&format!(
@@ -555,21 +555,21 @@ fn build_queries(conf: &SqlxModelConf) -> Vec<TokenStream2> {
         }
 
         pub async fn all(&self) -> sqlx::Result<Vec<#struct_name>> {
-          let attrs = sqlx::query_as!(#attrs_struct, #query, #(&self.#arg_names as &#args_types),*)
+          let attrs = sqlx::query_as!(#attrs_struct, #query, #(&self.#arg_names as &#arg_types),*)
             .fetch_all(&self.state.db).await?;
 
           Ok(attrs.into_iter().map(|a| self.init(a) ).collect())
         }
 
         pub async fn one(&self) -> sqlx::Result<#struct_name> {
-          let attrs = sqlx::query_as!(#attrs_struct, #query, #(&self.#arg_names as &#args_types),*)
+          let attrs = sqlx::query_as!(#attrs_struct, #query, #(&self.#arg_names as &#arg_types),*)
             .fetch_one(&self.state.db).await?;
 
           Ok(self.init(attrs))
         }
 
         pub async fn optional(&self) -> sqlx::Result<Option<#struct_name>> {
-          let attrs = sqlx::query_as!(#attrs_struct, #query, #(&self.#arg_names as &#args_types),*)
+          let attrs = sqlx::query_as!(#attrs_struct, #query, #(&self.#arg_names as &#arg_types),*)
             .fetch_optional(&self.state.db).await?;
 
           Ok(attrs.map(|a| self.init(a)))
@@ -578,7 +578,7 @@ fn build_queries(conf: &SqlxModelConf) -> Vec<TokenStream2> {
 
       impl #hub_struct {
         pub fn #method_name(&self, #args) -> #query_struct_name {
-          #query_struct_name{ state: self.state.clone(), #arg_names }
+          #query_struct_name{ state: self.state.clone(), #(#arg_names,)* }
         }
       }
     }
