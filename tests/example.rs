@@ -48,6 +48,19 @@ make_sqlx_model!{
   }
 }
 
+make_sqlx_model!{
+  state: App,
+  table: persons,
+  struct Aliased {
+    #[sqlx_search_as(int4)]
+    id: i32,
+    #[sqlx_search_as(varchar)]
+    alias: String,
+    #[sqlx_search_as(boolean)]
+    has_drivers_license: bool,
+  }
+}
+
 impl Person {
   fn alias_or_default<'a>(&'a self) -> &'a str {
     self.attrs.alias.as_ref().unwrap_or(&self.state.default_alias)
@@ -90,6 +103,9 @@ fn persons_crud() {
       agreed_to_terms: Some(true),
       stringified_field: 10,
     });
+
+    let aliased = app.aliased().find(person.id()).await.unwrap();
+    assert_eq!(aliased.attrs.alias, "wairi".to_string());
 
     // If you want compile-time guarantees, or if you construct your full list
     // of attributes say from reading a JSON or using Default::default(),

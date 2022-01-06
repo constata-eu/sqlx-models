@@ -43,8 +43,10 @@ impl Parse for Query {
     let content;
     parenthesized!(content in input);
     let sql: LitStr = content.parse()?;
-    content.parse::<Token![,]>()?;
-    let args: Punctuated<BareFnArg, Comma> = content.parse_terminated(BareFnArg::parse)?;
+    let args: Punctuated<BareFnArg, Comma> = match content.parse::<Token![,]>() {
+      Ok(_) => content.parse_terminated(BareFnArg::parse)?,
+      _ => Punctuated::new()
+    };
     Ok(Query{ method_name, sql, args })
   }
 }
@@ -170,11 +172,6 @@ pub fn make_sqlx_model(tokens: TokenStream) -> TokenStream {
   let queries_section = build_queries(&conf);
 
   let quoted = quote!{
-    use sqlx::{
-      postgres::{PgArguments, Postgres},
-      Database,
-    };
-
     pub struct #hub_struct {
       state: #state_name,
     }
@@ -246,9 +243,12 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
       }
 
       pub async fn reload(&mut self) -> sqlx::Result<()> {
-        let new = self.state.#hub_builder_method().select().id_eq(&self.attrs.id).one().await?;
-        self.attrs = new.attrs;
+        self.attrs = self.reloaded().await?.attrs;
         Ok(())
+      }
+
+      pub async fn reloaded(&self) -> sqlx::Result<Self> {
+        self.state.#hub_builder_method().find(self.id()).await
       }
 
       #(
