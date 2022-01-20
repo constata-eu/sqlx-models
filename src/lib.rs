@@ -603,6 +603,7 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
   let insert_struct = format_ident!("Insert{}Hub", &struct_name);
   let insert_struct_as_string = LitStr::new(&insert_struct.to_string(), span);
   let insert_attrs_struct = format_ident!("Insert{}", &struct_name);
+  let insert_struct_inner = format_ident!("Insert{}HubAttrs", &struct_name);
 
   let column_names_to_insert = field_idents_except_id.iter()
     .map(|f| f.to_string() )
@@ -627,37 +628,47 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
       }
     }
 
+    #[derive(Clone, Default)]
+    pub struct #insert_struct_inner {
+      #(pub #field_idents_except_id: Option<#field_types_except_id>,)*
+    }
+
+    impl #insert_struct_inner {
+      pub fn new(state: #state_name) -> Self {
+        Self{
+          #(#field_idents_except_id: None,)*
+        }
+      }
+    }
+
     #[derive(Clone)]
     pub struct #insert_struct {
       pub state: #state_name,
-      #(pub #field_idents_except_id: Option<#field_types_except_id>,)*
+      pub attrs: #insert_struct_inner,
     }
 
     impl #insert_struct {
       pub fn new(state: #state_name) -> Self {
-        Self{
-          state,
-          #(#field_idents_except_id: None,)*
-        }
+        Self{ state, attrs: Default::default() }
       }
 
       #(
         pub fn #field_idents_except_id(mut self, val: #field_types_except_id) -> Self {
-          self.#field_idents_except_id = Some(val);
+          self.attrs.#field_idents_except_id = Some(val);
           self
         }
       )*
 
       pub fn use_struct(mut self, vals: #insert_attrs_struct) -> Self {
         #(
-          self.#field_idents_except_id = Some(vals.#field_idents_except_id);
+          self.attrs.#field_idents_except_id = Some(vals.#field_idents_except_id);
         )*
         self
       }
 
       pub async fn save(self) -> std::result::Result<#struct_name, sqlx::Error> {
         #(
-          let #field_idents_except_id = self.#field_idents_except_id.clone()
+          let #field_idents_except_id = self.attrs.#field_idents_except_id.clone()
             .ok_or(sqlx::Error::ColumnNotFound(#field_idents_except_id_as_string.to_string()))?;
         )*
 
@@ -675,7 +686,7 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
       fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(#insert_struct_as_string)
           #(
-            .field(#field_idents_except_id_as_string, &self.#field_idents_except_id)
+            .field(#field_idents_except_id_as_string, &self.attrs.#field_idents_except_id)
           )*
          .finish()
       }
