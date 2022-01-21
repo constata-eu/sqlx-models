@@ -298,6 +298,10 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
 
   let mut eq_idents: Vec<Ident> = vec![];
   let mut eq_types: Vec<Type> = vec![];
+  let mut gt_idents: Vec<Ident> = vec![];
+  let mut gt_types: Vec<Type> = vec![];
+  let mut lt_idents: Vec<Ident> = vec![];
+  let mut lt_types: Vec<Type> = vec![];
   let mut is_set_idents: Vec<Ident> = vec![];
   let mut where_clauses = vec![];
   let mut args = vec![];
@@ -322,13 +326,13 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
 
     field.attrs.iter().filter(|a| a.path == parse_str("sqlx_search_as").unwrap() ).next().map(|found|{
       let db_type = format!("{}", found.parse_args::<Ident>().expect("Arguments for sqlx_search_as"));
-      let base_field_pos = args.len() + 1;
+      let base_field_pos = args.len();
 
       let eq_field_ident = format_ident!("{}_eq", ident);
       eq_idents.push(eq_field_ident.clone());
       eq_types.push(ty.clone());
       where_clauses.push(
-        format!("(NOT ${}::boolean OR {} = ${}::{})", base_field_pos, &ident, base_field_pos + 1, &db_type)
+        format!("(NOT ${}::boolean OR {} = ${}::{})", base_field_pos + 1, &ident, base_field_pos + 2, &db_type)
       );
       args.push(quote!{ self.#eq_field_ident.is_some() });
 
@@ -342,15 +346,51 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
         };
       }
 
+      let gt_field_ident = format_ident!("{}_gt", ident);
+      gt_idents.push(gt_field_ident.clone());
+      gt_types.push(ty.clone());
+      where_clauses.push(
+        format!("(NOT ${}::boolean OR {} > ${}::{})", base_field_pos + 3, &ident, base_field_pos + 4, &db_type)
+      );
+      args.push(quote!{ self.#gt_field_ident.is_some() });
+
+      // All search arguments must be Option<ty>.
+      // If the field already is an option (and maybe a nested option) we just flatten it.
+      if let Type::Path(TypePath{path: Path{ segments, .. }, .. }) = ty {
+        if &segments[0].ident.to_string() == "Option" {
+          args.push(quote!{ &self.#gt_field_ident.clone().flatten() as &#ty });
+        } else {
+          args.push(quote!{ &self.#gt_field_ident as &Option<#ty> });
+        };
+      }
+
+      let lt_field_ident = format_ident!("{}_lt", ident);
+      lt_idents.push(lt_field_ident.clone());
+      lt_types.push(ty.clone());
+      where_clauses.push(
+        format!("(NOT ${}::boolean OR {} < ${}::{})", base_field_pos + 5, &ident, base_field_pos + 6, &db_type)
+      );
+      args.push(quote!{ self.#lt_field_ident.is_some() });
+
+      // All search arguments must be Option<ty>.
+      // If the field already is an option (and maybe a nested option) we just flatten it.
+      if let Type::Path(TypePath{path: Path{ segments, .. }, .. }) = ty {
+        if &segments[0].ident.to_string() == "Option" {
+          args.push(quote!{ &self.#lt_field_ident.clone().flatten() as &#ty });
+        } else {
+          args.push(quote!{ &self.#lt_field_ident as &Option<#ty> });
+        };
+      }
+
       let is_set_field_ident = format_ident!("{}_is_set", ident);
       is_set_idents.push(is_set_field_ident.clone());
       where_clauses.push(
         format!(
           "(${}::boolean IS NULL OR ((${}::boolean AND {} IS NOT NULL) OR (NOT ${}::boolean AND {} IS NULL)))",
-          base_field_pos + 2,
-          base_field_pos + 2,
+          base_field_pos + 7,
+          base_field_pos + 7,
           &ident,
-          base_field_pos + 2,
+          base_field_pos + 7,
           &ident,
         )
       );
@@ -361,6 +401,12 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
   let select_struct_str = LitStr::new(&select_struct.to_string(), span);
 
   let eq_idents_as_str: Vec<LitStr> = eq_idents.iter()
+    .map(|i| LitStr::new(&i.to_string(), span) ).collect();
+
+  let gt_idents_as_str: Vec<LitStr> = gt_idents.iter()
+    .map(|i| LitStr::new(&i.to_string(), span) ).collect();
+
+  let lt_idents_as_str: Vec<LitStr> = lt_idents.iter()
     .map(|i| LitStr::new(&i.to_string(), span) ).collect();
 
   let is_set_idents_as_str: Vec<LitStr> = is_set_idents.iter()
@@ -408,6 +454,8 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
     pub struct #select_struct {
       pub state: #state_name,
       #(pub #eq_idents: Option<#eq_types>,)*
+      #(pub #lt_idents: Option<#lt_types>,)*
+      #(pub #gt_idents: Option<#gt_types>,)*
       #(pub #is_set_idents: Option<bool>,)*
       pub order_by: Option<#order_by_enum>,
       pub desc: bool,
@@ -423,6 +471,8 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
          .field("limit", &self.limit)
          .field("offset", &self.offset)
           #(.field(#eq_idents_as_str, &self.#eq_idents))*
+          #(.field(#gt_idents_as_str, &self.#gt_idents))*
+          #(.field(#lt_idents_as_str, &self.#lt_idents))*
           #(.field(#is_set_idents_as_str, &self.#is_set_idents))*
          .finish()
       }
@@ -437,6 +487,8 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
           limit: None,
           offset: None,
           #(#eq_idents: None,)*
+          #(#lt_idents: None,)*
+          #(#gt_idents: None,)*
           #(#is_set_idents: None,)*
         }
       }
@@ -469,6 +521,20 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
       )*
 
       #(
+        pub fn #gt_idents(mut self, val: &#gt_types) -> Self {
+          self.#gt_idents = Some(val.clone());
+          self
+        }
+      )*
+
+      #(
+        pub fn #lt_idents(mut self, val: &#lt_types) -> Self {
+          self.#lt_idents = Some(val.clone());
+          self
+        }
+      )*
+
+      #(
         pub fn #is_set_idents(mut self, val: bool) -> Self {
           self.#is_set_idents = Some(val);
           self
@@ -477,6 +543,8 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
 
       pub fn use_struct(mut self, value: #select_attrs_struct) -> Self {
         #(self.#eq_idents = value.#eq_idents;)*
+        #(self.#lt_idents = value.#lt_idents;)*
+        #(self.#gt_idents = value.#gt_idents;)*
         #(self.#is_set_idents = value.#is_set_idents;)*
         self.order_by = value.order_by;
         self.desc = value.desc;
@@ -511,6 +579,8 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
     #[derive(Debug, Default)]
     pub struct #select_attrs_struct {
       #(pub #eq_idents: Option<#eq_types>,)*
+      #(pub #lt_idents: Option<#lt_types>,)*
+      #(pub #gt_idents: Option<#gt_types>,)*
       #(pub #is_set_idents: Option<bool>,)*
       pub order_by: Option<#order_by_enum>,
       pub desc: bool,

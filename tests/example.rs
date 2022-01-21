@@ -172,6 +172,12 @@ fn persons_crud() {
     let backwards = app.person().select().order_by(PersonOrderBy::Id).desc().all().await.unwrap();
     assert_eq!(backwards, vec![other_person.clone(), person.clone()]);
 
+    let over_1_meter_tall = app.person().select().height_in_meters_gt(&Decimal::ONE).all().await.unwrap();
+    assert_eq!(over_1_meter_tall, vec![person.clone()]);
+
+    let under_1_meter_tall = app.person().select().height_in_meters_lt(&Decimal::ONE).all().await.unwrap();
+    assert_eq!(under_1_meter_tall, vec![other_person.clone()]);
+
     let limited = app.person().select().order_by(PersonOrderBy::Id).desc().limit(1).all().await.unwrap();
     assert_eq!(limited, vec![other_person.clone()]);
 
