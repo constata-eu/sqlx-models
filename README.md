@@ -1,5 +1,7 @@
 ActiveRecord / Broker pattern for SQLX. (Postgres only for now)
 
+See a "kitchen sink" demo in the [examples](https://github.com/constata-eu/sqlx-models-derive/blob/master/tests/example.rs)
+
 A procedural macro that creates a family of types for your Postgres tables.
 
 Each resource access your custom application state, which must include a db connection or pool.
