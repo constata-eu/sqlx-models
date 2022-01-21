@@ -163,8 +163,23 @@ fn persons_crud() {
     let people_called_anon = app.person().select().name_eq(&"Anonymous".to_string()).all().await.unwrap();
     assert_eq!(people_called_anon, vec![other_person.clone()]);
 
+    let people_like_wai = app.person().select().alias_like(&"%wai%".to_string()).all().await.unwrap();
+    assert_eq!(people_like_wai, vec![person.clone()]);
+
+    let people_not_like_alan = app.person().select().name_not_like(&"%Alan%".to_string()).all().await.unwrap();
+    assert_eq!(people_not_like_alan, vec![other_person.clone()]);
+
+    let people_similar_to_anon = app.person().select().name_similar_to(&"_nony%".to_string()).all().await.unwrap();
+    assert_eq!(people_similar_to_anon, vec![other_person.clone()]);
+
+    let people_not_similar_to_anon = app.person().select().name_not_similar_to(&"_nony%".to_string()).all().await.unwrap();
+    assert_eq!(people_not_similar_to_anon, vec![person.clone()]);
+
     let someone_specific = app.person().select().id_eq(&person_id).one().await.unwrap();
     assert_eq!(someone_specific, person.clone());
+
+    let not_equal = app.person().select().id_ne(&person_id).one().await.unwrap();
+    assert_eq!(not_equal, other_person.clone());
 
     let non_existing = app.person().select().id_eq(&123456).optional().await.unwrap();
     assert!(non_existing.is_none());
@@ -177,6 +192,12 @@ fn persons_crud() {
 
     let under_1_meter_tall = app.person().select().height_in_meters_lt(&Decimal::ONE).all().await.unwrap();
     assert_eq!(under_1_meter_tall, vec![other_person.clone()]);
+
+    let less_than_or_equal = app.person().select().height_in_meters_lte(&Decimal::ZERO).all().await.unwrap();
+    assert_eq!(less_than_or_equal, vec![other_person.clone()]);
+
+    let greater_than_or_equal = app.person().select().height_in_meters_gte(&Decimal::new(270,2)).all().await.unwrap();
+    assert_eq!(greater_than_or_equal, vec![person.clone()]);
 
     let limited = app.person().select().order_by(PersonOrderBy::Id).desc().limit(1).all().await.unwrap();
     assert_eq!(limited, vec![other_person.clone()]);
