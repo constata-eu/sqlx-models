@@ -28,19 +28,19 @@ make_sqlx_model!{
   table: persons,
   #[serde_as]
   struct Person {
-    #[sqlx_search_as(int4)]
+    #[sqlx_model_hints(int4, default)]
     id: i32,
-    #[sqlx_search_as(varchar)]
+    #[sqlx_model_hints(varchar)]
     name: String,
-    #[sqlx_search_as(varchar)]
+    #[sqlx_model_hints(varchar)]
     alias: Option<String>,
-    #[sqlx_search_as(decimal)]
+    #[sqlx_model_hints(decimal)]
     height_in_meters: Decimal,
-    #[sqlx_search_as(boolean)]
+    #[sqlx_model_hints(boolean)]
     has_drivers_license: bool,
     agreed_to_terms: Option<bool>,
     #[serde_as(as = "DisplayFromStr")]
-    #[sqlx_search_as(int4)]
+    #[sqlx_model_hints(int4)]
     stringified_field: i32,
   },
   queries {
@@ -52,12 +52,23 @@ make_sqlx_model!{
   state: App,
   table: persons,
   struct Aliased {
-    #[sqlx_search_as(int4)]
+    #[sqlx_model_hints(int4)]
     id: i32,
-    #[sqlx_search_as(varchar)]
+    #[sqlx_model_hints(varchar)]
     alias: String,
-    #[sqlx_search_as(boolean)]
+    #[sqlx_model_hints(boolean)]
     has_drivers_license: bool,
+  }
+}
+
+make_sqlx_model!{
+  state: App,
+  table: dogs,
+  struct Dog {
+    #[sqlx_model_hints(varchar)]
+    id: String,
+    #[sqlx_model_hints(varchar, default)]
+    alias: String,
   }
 }
 
@@ -268,5 +279,21 @@ fn persons_crud() {
       "stringified_field":"0"
     }"#).expect("Person to be parseable");
 
+    // A dog does not have a default ID but has a default alias.
+    // So the alias is not part of the insert structure.
+    // If you want the option to insert providing a default value from rust,
+    // you can define an alias (copy/paste) of the Dog sqlx_model.
+    let dog = app.dog()
+      .insert()
+      .use_struct(InsertDog{ id: "Maximus Spikus".to_string() })
+      .save().await
+      .unwrap();
+
+    assert_eq!(dog.id(), &"Maximus Spikus".to_string());
+    assert_eq!(dog.alias(), &"doge".to_string());
+
+    // Alternatively, if you don't like the default value, and don't want two versions of your model
+    // just do an update right after creating.
+    assert_eq!(dog.update().alias("firulais".to_string()).save().await.unwrap().alias(), "firulais");
   });
 }

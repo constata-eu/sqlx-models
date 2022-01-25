@@ -8,3 +8,8 @@ CREATE TABLE persons  (
   stringified_field INTEGER
 );
 
+CREATE TABLE dogs (
+  id VARCHAR PRIMARY KEY NOT NULL,
+  alias VARCHAR DEFAULT 'doge'
+);
+

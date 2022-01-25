@@ -1,9 +1,3 @@
-/* Single list of idents and types.
- *
- */
-
-
-
 extern crate proc_macro;
 use convert_case::{Case, Casing};
 use proc_macro::TokenStream;
@@ -34,6 +28,7 @@ mod kw {
   syn::custom_keyword!(table);
   syn::custom_keyword!(state);
   syn::custom_keyword!(queries);
+  syn::custom_keyword!(default);
 }
 
 #[derive(Debug)]
@@ -58,6 +53,20 @@ impl Parse for Query {
 }
 
 #[derive(Debug)]
+struct ModelHints {
+  ty: Ident,
+  default: bool,
+}
+
+impl Parse for ModelHints {
+  fn parse(input: ParseStream) -> Result<Self> {
+    let ty: Ident = input.parse()?;
+    let default = input.parse::<Token![,]>().is_ok() && input.parse::<kw::default>().is_ok();
+    Ok(ModelHints{ ty, default })
+  }
+}
+
+#[derive(Debug)]
 struct SqlxModelConf {
   id_type: Type,
   struct_name: Ident,
@@ -66,14 +75,10 @@ struct SqlxModelConf {
   state_name: Ident,
   table_name: Ident,
   fields: Punctuated<Field, Comma>,
-  fields_except_id: Vec<Field>,
   queries: Punctuated<Query, Comma>,
   hub_struct: Ident,
   sql_select_columns: String,
   field_idents: Vec<Ident>,
-  field_idents_except_id: Vec<Ident>,
-  field_types_except_id: Vec<Type>,
-  field_attrs_except_id: Vec<Vec<Attribute>>,
   hub_builder_method: Ident,
 }
 
@@ -119,22 +124,6 @@ impl Parse for SqlxModelConf {
     let field_idents: Vec<Ident> = fields.clone().into_iter()
       .map(|i| i.ident.unwrap() ).collect();
 
-    let fields_except_id: Vec<Field> = fields.clone().into_iter()
-      .filter(|i| i.ident.as_ref().unwrap() != "id" )
-      .collect();
-
-    let field_attrs_except_id: Vec<Vec<Attribute>> = fields_except_id.clone().into_iter().map(|field|{
-      field.attrs.into_iter()
-        .filter(|a| a.path != parse_str("sqlx_search_as").unwrap() )
-        .collect::<Vec<Attribute>>()
-    }).collect();
-
-    let field_idents_except_id: Vec<Ident> = fields_except_id.clone().into_iter()
-      .map(|i| i.ident.unwrap() ).collect();
-
-    let field_types_except_id: Vec<Type> = fields_except_id.clone().into_iter()
-      .map(|i| i.ty ).collect();
-
     let id_type = fields.iter()
       .filter(|i| i.ident.as_ref().unwrap() == "id" )
       .next().expect("struct to have an id field")
@@ -150,14 +139,10 @@ impl Parse for SqlxModelConf {
       attrs_struct,
       table_name,
       fields,
-      fields_except_id,
       queries,
       hub_struct,
       sql_select_columns,
       field_idents,
-      field_idents_except_id,
-      field_types_except_id,
-      field_attrs_except_id,
       hub_builder_method,
     })
   }
@@ -224,7 +209,7 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
 
   let field_attrs: Vec<Vec<Attribute>> = conf.fields.clone().into_iter().map(|field|{
     field.attrs.into_iter()
-      .filter(|a| a.path != parse_str("sqlx_search_as").unwrap() )
+      .filter(|a| a.path != parse_str("sqlx_model_hints").unwrap() )
       .collect::<Vec<Attribute>>()
   }).collect();
 
@@ -327,8 +312,9 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
     let string_ty: syn::Type = syn::parse_quote!{ String };
     let ident = &field.ident.as_ref().unwrap();
 
-    field.attrs.iter().filter(|a| a.path == parse_str("sqlx_search_as").unwrap() ).next().map(|found|{
-      let db_type = format!("{}", found.parse_args::<Ident>().expect("Arguments for sqlx_search_as"));
+    field.attrs.iter().filter(|a| a.path == parse_str("sqlx_model_hints").unwrap() ).next().map(|found|{
+      let hints = found.parse_args::<ModelHints>().expect(&format!("Arguments for sqlx_model_hints {:?}", found));
+      let db_type = hints.ty.to_string();
       let mut field_position = args.len();
 
       let mut comparisons = vec![
@@ -627,25 +613,41 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
   let hub_struct = &conf.hub_struct;
   let table_name = &conf.table_name;
   let attrs_struct = &conf.attrs_struct;
-  let field_idents_except_id = &conf.field_idents_except_id;
-  let field_types_except_id = &conf.field_types_except_id;
-  let field_attrs_except_id = &conf.field_attrs_except_id;
   let extra_struct_attributes = &conf.extra_struct_attributes;
 
-  let field_idents_except_id_as_string: Vec<LitStr> = field_idents_except_id.iter()
+  let fields_for_insert: Vec<Field> = conf.fields.clone().into_iter().filter(|field|{
+    match field.attrs.iter().filter(|a| a.path == parse_str("sqlx_model_hints").unwrap() ).next() {
+      None => true,
+      Some(found) => {
+        let hint: ModelHints = found.parse_args().unwrap();
+        !hint.default
+      }
+    }
+  }).collect();
+
+  let fields_for_insert_idents: Vec<Ident> = fields_for_insert.iter().map(|i| i.ident.as_ref().unwrap().clone() ).collect();
+  let fields_for_insert_types: Vec<Type> = fields_for_insert.iter().map(|i| i.ty.clone() ).collect();
+
+  let fields_for_insert_as_string: Vec<LitStr> = fields_for_insert_idents.iter()
     .map(|i| LitStr::new(&i.to_string(), i.span()) ).collect();
+
+  let fields_for_insert_attrs: Vec<Vec<Attribute>> = fields_for_insert.clone().into_iter().map(|field|{
+      field.attrs.into_iter()
+        .filter(|a| a.path != parse_str("sqlx_model_hints").unwrap() )
+        .collect::<Vec<Attribute>>()
+    }).collect();
 
   let insert_struct = format_ident!("Insert{}Hub", &struct_name);
   let insert_struct_as_string = LitStr::new(&insert_struct.to_string(), span);
   let insert_attrs_struct = format_ident!("Insert{}", &struct_name);
   let insert_struct_inner = format_ident!("Insert{}HubAttrs", &struct_name);
 
-  let column_names_to_insert = field_idents_except_id.iter()
+  let column_names_to_insert = fields_for_insert_idents.iter()
     .map(|f| f.to_string() )
     .collect::<Vec<String>>()
     .join(", \n");
 
-  let column_names_to_insert_positions = field_idents_except_id.iter().enumerate()
+  let column_names_to_insert_positions = fields_for_insert.iter().enumerate()
     .map(|(n, _)| format!("${}", n+1) ).collect::<Vec<String>>().join(", ");
 
   let query_for_insert = LitStr::new(&format!(
@@ -665,13 +667,13 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
 
     #[derive(Clone, Default)]
     pub struct #insert_struct_inner {
-      #(pub #field_idents_except_id: Option<#field_types_except_id>,)*
+      #(pub #fields_for_insert_idents: Option<#fields_for_insert_types>,)*
     }
 
     impl #insert_struct_inner {
       pub fn new(state: #state_name) -> Self {
         Self{
-          #(#field_idents_except_id: None,)*
+          #(#fields_for_insert_idents: None,)*
         }
       }
     }
@@ -688,29 +690,29 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
       }
 
       #(
-        pub fn #field_idents_except_id(mut self, val: #field_types_except_id) -> Self {
-          self.attrs.#field_idents_except_id = Some(val);
+        pub fn #fields_for_insert_idents(mut self, val: #fields_for_insert_types) -> Self {
+          self.attrs.#fields_for_insert_idents = Some(val);
           self
         }
       )*
 
       pub fn use_struct(mut self, vals: #insert_attrs_struct) -> Self {
         #(
-          self.attrs.#field_idents_except_id = Some(vals.#field_idents_except_id);
+          self.attrs.#fields_for_insert_idents = Some(vals.#fields_for_insert_idents);
         )*
         self
       }
 
       pub async fn save(self) -> std::result::Result<#struct_name, sqlx::Error> {
         #(
-          let #field_idents_except_id = self.attrs.#field_idents_except_id.clone()
-            .ok_or(sqlx::Error::ColumnNotFound(#field_idents_except_id_as_string.to_string()))?;
+          let #fields_for_insert_idents = self.attrs.#fields_for_insert_idents.clone()
+            .ok_or(sqlx::Error::ColumnNotFound(#fields_for_insert_as_string.to_string()))?;
         )*
 
         let attrs = sqlx::query_as!(
           #attrs_struct,
           #query_for_insert,
-          #(#field_idents_except_id as #field_types_except_id),*
+          #(#fields_for_insert_idents as #fields_for_insert_types),*
         ).fetch_one(&self.state.db).await?;
 
         Ok(#struct_name::new(self.state.clone(), attrs))
@@ -721,7 +723,7 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
       fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(#insert_struct_as_string)
           #(
-            .field(#field_idents_except_id_as_string, &self.attrs.#field_idents_except_id)
+            .field(#fields_for_insert_as_string, &self.attrs.#fields_for_insert_idents)
           )*
          .finish()
       }
@@ -731,8 +733,8 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
     pub struct #insert_attrs_struct {
       #(
-        #(#field_attrs_except_id)*
-        pub #field_idents_except_id: #field_types_except_id,
+        #(#fields_for_insert_attrs)*
+        pub #fields_for_insert_idents: #fields_for_insert_types,
       )*
     }
   }
@@ -744,17 +746,17 @@ fn build_update(conf: &SqlxModelConf) -> TokenStream2 {
   let struct_name = &conf.struct_name;
   let table_name = &conf.table_name;
   let attrs_struct = &conf.attrs_struct;
-  let fields_except_id = &conf.fields_except_id;
-  let field_idents_except_id = &conf.field_idents_except_id;
-  let field_types_except_id = &conf.field_types_except_id;
+  let fields = &conf.fields;
+  let field_idents = &conf.field_idents;
   let id_type = &conf.id_type;
+  let field_types: Vec<Type> = fields.clone().into_iter().map(|i| i.ty ).collect();
 
   let update_struct = format_ident!("Update{}Hub", &struct_name);
   let update_attrs_struct = format_ident!("Update{}", &struct_name);
 
   let mut args_for_update = vec![];
 
-  for field in fields_except_id.clone().into_iter() {
+  for field in fields.clone().into_iter() {
     let ty = field.ty;
     let ident = field.ident.unwrap();
     if let Type::Path(TypePath{path: Path{ref segments, .. }, .. }) = ty {
@@ -767,12 +769,12 @@ fn build_update(conf: &SqlxModelConf) -> TokenStream2 {
     }
   }
 
-  let column_names_to_insert = field_idents_except_id.iter()
+  let column_names_to_insert = field_idents.iter()
     .map(|f| f.to_string() )
     .collect::<Vec<String>>()
     .join(", \n");
 
-  let column_names_to_update_positions = field_idents_except_id.iter().enumerate()
+  let column_names_to_update_positions = field_idents.iter().enumerate()
     .map(|(n, f)|{
       let base_pos = 2 + (n*2);
       format!("(CASE ${}::boolean WHEN TRUE THEN ${} ELSE {} END)", base_pos, base_pos + 1, f.clone())
@@ -807,8 +809,8 @@ fn build_update(conf: &SqlxModelConf) -> TokenStream2 {
       }
 
       #(
-        pub fn #field_idents_except_id(mut self, val: #field_types_except_id) -> Self {
-          self.attrs.#field_idents_except_id = Some(val);
+        pub fn #field_idents(mut self, val: #field_types) -> Self {
+          self.attrs.#field_idents = Some(val);
           self
         }
       )*
@@ -832,7 +834,7 @@ fn build_update(conf: &SqlxModelConf) -> TokenStream2 {
 
     #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
     pub struct #update_attrs_struct {
-      #( pub #field_idents_except_id: Option<#field_types_except_id>,)*
+      #( pub #field_idents: Option<#field_types>,)*
     }
   }
 }
