@@ -203,6 +203,8 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
   let field_idents = &conf.field_idents;
   let extra_struct_attributes = &conf.extra_struct_attributes;
   let hub_builder_method = &conf.hub_builder_method;
+  let select_struct = format_ident!("Select{}Hub", &struct_name);
+  let select_attrs_struct = format_ident!("Select{}", &struct_name);
   let struct_name_as_string = LitStr::new(&struct_name.to_string(), struct_name.span());
   let field_types: Vec<Type> = conf.fields.clone().into_iter()
     .map(|i| i.ty ).collect();
@@ -247,6 +249,13 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
           &self.attrs.#field_idents
         }
       )*
+    }
+
+    #[sqlx_models::async_trait]
+    impl sqlx_models::SqlxModel for #struct_name {
+      type State = #state_name;
+      type SelectModelHub = #select_struct;
+      type SelectModel = #select_attrs_struct;
     }
     
     impl PartialEq for #struct_name {
@@ -529,6 +538,21 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
       }
     }
 
+    #[sqlx_models::async_trait]
+    impl sqlx_models::SqlxSelectModelHub<#struct_name> for  #select_struct {
+      fn from_state(state: <#struct_name as sqlx_models::SqlxModel>::State) -> Self{
+        #select_struct::new(state)
+      }
+
+      fn use_struct(self, value: <#struct_name as sqlx_models::SqlxModel>::SelectModel) -> Self {
+        self.use_struct(value)
+      }
+
+      async fn all(&self) -> sqlx::Result<Vec<#struct_name>> {
+        self.all().await
+      }
+    }
+
     #[derive(Debug, Default)]
     pub struct #select_attrs_struct {
       #(pub #comparison_idents: Option<#comparison_types>,)*
@@ -537,6 +561,17 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
       pub desc: bool,
       pub limit: Option<i64>,
       pub offset: Option<i64>,
+    }
+
+    impl sqlx_models::SqlxSelectModel for #select_attrs_struct {
+      fn from_common_fields(limit: Option<i64>, offset: Option<i64>, desc: bool) -> Self {
+        #select_attrs_struct {
+          limit,
+          offset,
+          desc,
+          ..Default::default()
+        }
+      }
     }
   }
 }

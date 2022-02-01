@@ -1,0 +1,24 @@
+[package]
+name = "sqlx-models-derive"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+syn = { version = "*", features = ["extra-traits", "full"] }
+quote = "*"
+convert_case = "*"
+
+[dev-dependencies]
+serde = "*"
+serde_json = "*"
+tokio = { version = "1.2.0", features = ["full"] }
+sqlx = { version = "0.5.2", features = [ "postgres", "runtime-tokio-native-tls", "offline", "chrono", "json", "decimal" ] }
+base64-serde = "0.6.1"
+base64 = "0.13.0"
+serde_with = { version = "1.6.4", features = ["hex"]}
+
+[lib]
+proc-macro = true
+

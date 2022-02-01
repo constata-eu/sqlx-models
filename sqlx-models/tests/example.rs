@@ -229,6 +229,14 @@ fn persons_crud() {
       .all().await.unwrap();
     assert_eq!(from_struct, vec![person.clone()]);
 
+    use sqlx_models::SqlxSelectModel;
+
+    let using_trait_struct = app.person().select()
+      .use_struct(SelectPerson::from_common_fields(Some(1), Some(1), true))
+      .order_by(PersonOrderBy::Id)
+      .all().await.unwrap();
+    assert_eq!(using_trait_struct, vec![person.clone()]);
+
     // Custom queries can be used directly on the hub.
     let guiness_height = app.person().guiness_height_with_alias("wairi".to_string()).one().await.unwrap();
     assert_eq!(guiness_height, person.clone());
