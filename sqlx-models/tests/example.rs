@@ -195,7 +195,7 @@ fn persons_crud() {
     let non_existing = app.person().select().id_eq(&123456).optional().await.unwrap();
     assert!(non_existing.is_none());
 
-    let backwards = app.person().select().order_by(PersonOrderBy::Id).desc().all().await.unwrap();
+    let backwards = app.person().select().order_by(PersonOrderBy::Id).desc(true).all().await.unwrap();
     assert_eq!(backwards, vec![other_person.clone(), person.clone()]);
 
     let over_1_meter_tall = app.person().select().height_in_meters_gt(&Decimal::ONE).all().await.unwrap();
@@ -210,11 +210,16 @@ fn persons_crud() {
     let greater_than_or_equal = app.person().select().height_in_meters_gte(&Decimal::new(270,2)).all().await.unwrap();
     assert_eq!(greater_than_or_equal, vec![person.clone()]);
 
-    let limited = app.person().select().order_by(PersonOrderBy::Id).desc().limit(1).all().await.unwrap();
+    let limited = app.person().select().order_by(PersonOrderBy::Id).desc(true).limit(1).all().await.unwrap();
     assert_eq!(limited, vec![other_person.clone()]);
 
-    let offset = app.person().select().order_by(PersonOrderBy::Id).desc().limit(1).offset(1).all().await.unwrap();
+    let offset = app.person().select().order_by(PersonOrderBy::Id).desc(true).limit(1).offset(1).all().await.unwrap();
     assert_eq!(offset, vec![person.clone()]);
+
+    // There's a count method too
+    assert_eq!(app.person().select().count().await.unwrap(), 2);
+
+    let offset = app.person().select().order_by(PersonOrderBy::Id).desc(true).limit(1).offset(1).all().await.unwrap();
 
     // At any point, a struct can be used to populate all the search criteria at once.
     let from_struct = app.person().select()
@@ -229,13 +234,10 @@ fn persons_crud() {
       .all().await.unwrap();
     assert_eq!(from_struct, vec![person.clone()]);
 
-    use sqlx_models::SqlxSelectModel;
+    use sqlx_models::*;
 
-    let using_trait_struct = app.person().select()
-      .use_struct(SelectPerson::from_common_fields(Some(1), Some(1), true))
-      .order_by(PersonOrderBy::Id)
-      .all().await.unwrap();
-    assert_eq!(using_trait_struct, vec![person.clone()]);
+    let using_trait_struct = PersonHub::from_state(app.clone()).select().all().await.unwrap();
+    assert_eq!(using_trait_struct, vec![person.clone(), other_person.clone()]);
 
     // Custom queries can be used directly on the hub.
     let guiness_height = app.person().guiness_height_with_alias("wairi".to_string()).one().await.unwrap();

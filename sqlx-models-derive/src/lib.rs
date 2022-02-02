@@ -201,10 +201,12 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
   let hub_struct = &conf.hub_struct;
   let attrs_struct = &conf.attrs_struct;
   let field_idents = &conf.field_idents;
+  let id_type = &conf.id_type;
   let extra_struct_attributes = &conf.extra_struct_attributes;
   let hub_builder_method = &conf.hub_builder_method;
   let select_struct = format_ident!("Select{}Hub", &struct_name);
   let select_attrs_struct = format_ident!("Select{}", &struct_name);
+  let model_order_by = format_ident!("{}OrderBy", &struct_name);
   let struct_name_as_string = LitStr::new(&struct_name.to_string(), struct_name.span());
   let field_types: Vec<Type> = conf.fields.clone().into_iter()
     .map(|i| i.ty ).collect();
@@ -256,6 +258,9 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
       type State = #state_name;
       type SelectModelHub = #select_struct;
       type SelectModel = #select_attrs_struct;
+      type ModelOrderBy = #model_order_by;
+      type ModelHub = #hub_struct;
+      type Id = #id_type;
     }
     
     impl PartialEq for #struct_name {
@@ -291,7 +296,7 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
   let attrs_struct = &conf.attrs_struct;
   let field_idents = &conf.field_idents;
   let select_struct = format_ident!("Select{}Hub", &struct_name);
-  let order_by_enum = format_ident!("{}OrderBy", &struct_name);
+  let model_order_by = format_ident!("{}OrderBy", &struct_name);
   let select_attrs_struct = format_ident!("Select{}", &struct_name);
   let id_type = &conf.id_type;
   let span = conf.struct_name.span().clone();
@@ -306,15 +311,6 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
     .iter()
     .map(|i| Ident::new(&i.to_string().to_case(Case::UpperCamel), i.span()))
     .collect();
-
-  let sort_field_pos = args.len() + 1;
-  let desc_field_pos = args.len() + 2;
-  let limit_field_pos = args.len() + 3;
-  let offset_field_pos = args.len() + 4;
-  args.push(quote!{ self.order_by.map(|i| format!("{:?}", i)) as Option<String> });
-  args.push(quote!{ self.desc as bool });
-  args.push(quote!{ self.limit as Option<i64> });
-  args.push(quote!{ self.offset as Option<i64> });
 
   for field in conf.fields.clone().into_iter() {
     let ty = field.ty.clone();
@@ -388,6 +384,18 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
     });
   }
 
+  let sort_field_pos = args.len() + 1;
+  let desc_field_pos = args.len() + 2;
+  let limit_field_pos = args.len() + 3;
+  let offset_field_pos = args.len() + 4;
+  args.push(quote!{ self.order_by.map(|i| format!("{:?}", i)) as Option<String> });
+  args.push(quote!{ self.desc as bool });
+  args.push(quote!{ self.limit as Option<i64> });
+  args.push(quote!{ self.offset as Option<i64> });
+
+  let mut args_for_count = args.clone();
+  args_for_count.truncate(args.len() - 4);
+
   let select_struct_str = LitStr::new(&select_struct.to_string(), span);
 
   let comparison_idents_as_str: Vec<LitStr> = comparison_idents.iter()
@@ -414,6 +422,12 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
     offset_field_pos,
   ), span);
 
+  let query_for_count = LitStr::new(&format!(
+    r#"SELECT count(*) as "count!" FROM {} WHERE {}"#,
+    table_name,
+    where_clauses.join(" AND "),
+  ), span);
+
   quote!{
     impl #hub_struct {
       pub fn select(&self) -> #select_struct {
@@ -429,8 +443,27 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
       }
     }
 
+    #[sqlx_models::async_trait]
+    impl sqlx_models::SqlxModelHub<#struct_name> for #hub_struct {
+      fn from_state(state: #state_name) -> Self {
+        #hub_struct::new(state)
+      }
+
+      fn select(&self) -> #select_struct {
+        self.select()
+      }
+
+      async fn find(&self, id: &#id_type) -> sqlx::Result<#struct_name> {
+        self.find(id).await
+      }
+
+      async fn find_optional(&self, id: &#id_type) -> sqlx::Result<Option<#struct_name>> {
+        self.find_optional(id).await
+      }
+    }
+
     #[derive(Debug, Copy, Clone)]
-    pub enum #order_by_enum {
+    pub enum #model_order_by {
       #(#sort_variants,)*
     }
 
@@ -439,7 +472,7 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
       pub state: #state_name,
       #(pub #comparison_idents: Option<#comparison_types>,)*
       #(pub #is_set_idents: Option<bool>,)*
-      pub order_by: Option<#order_by_enum>,
+      pub order_by: Option<#model_order_by>,
       pub desc: bool,
       pub limit: Option<i64>,
       pub offset: Option<i64>,
@@ -471,13 +504,18 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
         }
       }
 
-      pub fn order_by(mut self, val: #order_by_enum) -> Self {
+      pub fn order_by(mut self, val: #model_order_by) -> Self {
         self.order_by = Some(val.clone());
         self
       }
 
-      pub fn desc(mut self) -> Self {
-        self.desc = true;
+      pub fn maybe_order_by(mut self, val: Option<#model_order_by>) -> Self {
+        self.order_by = val.clone();
+        self
+      }
+
+      pub fn desc(mut self, val: bool) -> Self {
+        self.desc = val;
         self
       }
 
@@ -521,6 +559,11 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
         Ok(attrs.into_iter().map(|a| self.resource(a) ).collect())
       }
 
+      pub async fn count(&self) -> sqlx::Result<i64> {
+        sqlx::query_scalar!(#query_for_count, #(#args_for_count),*)
+          .fetch_one(&self.state.db).await
+      }
+
       pub async fn one(&self) -> sqlx::Result<#struct_name> {
         let attrs = sqlx::query_as!(#attrs_struct, #query_for_find, #(#args),*)
           .fetch_one(&self.state.db).await?;
@@ -539,17 +582,41 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
     }
 
     #[sqlx_models::async_trait]
-    impl sqlx_models::SqlxSelectModelHub<#struct_name> for  #select_struct {
-      fn from_state(state: <#struct_name as sqlx_models::SqlxModel>::State) -> Self{
+    impl sqlx_models::SqlxSelectModelHub<#struct_name> for #select_struct {
+      fn from_state(state: #state_name) -> Self {
         #select_struct::new(state)
       }
 
-      fn use_struct(self, value: <#struct_name as sqlx_models::SqlxModel>::SelectModel) -> Self {
+      fn order_by(mut self, val: #model_order_by) -> Self {
+        self.order_by(val)
+      }
+
+      fn maybe_order_by(mut self, val: Option<#model_order_by>) -> Self {
+        self.maybe_order_by(val)
+      }
+
+      fn desc(self, val: bool) -> Self {
+        self.desc(val)
+      }
+
+      fn limit(self, val: i64) -> Self {
+        self.limit(val)
+      }
+
+      fn offset(self, val: i64) -> Self {
+        self.offset(val)
+      }
+
+      fn use_struct(self, value: #select_attrs_struct) -> Self {
         self.use_struct(value)
       }
 
       async fn all(&self) -> sqlx::Result<Vec<#struct_name>> {
         self.all().await
+      }
+
+      async fn count(&self) -> sqlx::Result<i64> {
+        self.count().await
       }
     }
 
@@ -557,21 +624,10 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
     pub struct #select_attrs_struct {
       #(pub #comparison_idents: Option<#comparison_types>,)*
       #(pub #is_set_idents: Option<bool>,)*
-      pub order_by: Option<#order_by_enum>,
+      pub order_by: Option<#model_order_by>,
       pub desc: bool,
       pub limit: Option<i64>,
       pub offset: Option<i64>,
-    }
-
-    impl sqlx_models::SqlxSelectModel for #select_attrs_struct {
-      fn from_common_fields(limit: Option<i64>, offset: Option<i64>, desc: bool) -> Self {
-        #select_attrs_struct {
-          limit,
-          offset,
-          desc,
-          ..Default::default()
-        }
-      }
     }
   }
 }
