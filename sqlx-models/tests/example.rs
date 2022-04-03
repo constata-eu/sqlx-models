@@ -219,7 +219,7 @@ fn persons_crud() {
     // There's a count method too
     assert_eq!(app.person().select().count().await.unwrap(), 2);
 
-    let offset = app.person().select().order_by(PersonOrderBy::Id).desc(true).limit(1).offset(1).all().await.unwrap();
+    let _offset = app.person().select().order_by(PersonOrderBy::Id).desc(true).limit(1).offset(1).all().await.unwrap();
 
     // At any point, a struct can be used to populate all the search criteria at once.
     let from_struct = app.person().select()

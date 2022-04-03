@@ -618,6 +618,14 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
       async fn count(&self) -> sqlx::Result<i64> {
         self.count().await
       }
+
+      async fn one(&self) -> sqlx::Result<#struct_name> {
+        self.one().await
+      }
+
+      async fn optional(&self) -> sqlx::Result<Option<#struct_name>> {
+        self.optional().await
+      }
     }
 
     #[derive(Debug, Default)]

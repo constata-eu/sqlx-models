@@ -28,5 +28,7 @@ pub trait SqlxSelectModelHub<Model: SqlxModel>: Send + Sync + Sized {
   fn use_struct(self, value: Model::SelectModel) -> Self;
   async fn all(&self) -> sqlx::Result<Vec<Model>>;
   async fn count(&self) -> sqlx::Result<i64>;
+  async fn one(&self) -> sqlx::Result<Model>;
+  async fn optional(&self) -> sqlx::Result<Option<Model>>;
 }
 
