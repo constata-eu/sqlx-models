@@ -47,3 +47,27 @@ Main features, caveats, and design principles:
 - Only Postgres is supported at this point.
 - Only fetch one resource per query. Reinventing SQL for joining tables in the ORM is hard to maintain, and impossible to debug and understand for users.
 - Only one query per method. Combining multiple resources, or calling some code before or after saving should be done in custom methods implemented by the user on the main Resource struct.
+
+
+TODO:
+- Add "in" and not_in filters for all fields.
+- Add ilike and not_ilike to varchar fields.
+- Add lenses.
+- Add automatic relationships.
+
+- Write readme.
+  - Setup.
+  - Modeling columns and relationships.
+  - Inserting.
+  - Updating.
+  - Deleting.
+  - Selecting.
+    - Filters.
+    - Scopes.
+    - Traits for selecting.
+  - Lenses (almost state machines.)
+  
+  - Recipes:
+    - Model with default and non-default values.
+    - State machines with lenses.
+    

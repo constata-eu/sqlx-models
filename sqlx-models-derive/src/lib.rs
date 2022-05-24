@@ -10,6 +10,7 @@ use syn::{
   Field,
   Type,
   TypePath,
+  PathArguments,
   Path,
   Token,
   punctuated::Punctuated,
@@ -323,19 +324,21 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
       let mut field_position = args.len();
 
       let mut comparisons = vec![
-        (format_ident!("{}_eq",  ident), "=",   &ty),
-        (format_ident!("{}_ne",  ident), "!=",  &ty),
-        (format_ident!("{}_gt",  ident), ">",   &ty),
-        (format_ident!("{}_gte", ident), ">=",  &ty),
-        (format_ident!("{}_lt",  ident), "<",   &ty),
-        (format_ident!("{}_lte", ident), "<=",  &ty),
+        (format_ident!("{}_eq",     ident), "=",       &ty),
+        (format_ident!("{}_ne",     ident), "!=",      &ty),
+        (format_ident!("{}_gt",     ident), ">",       &ty),
+        (format_ident!("{}_gte",    ident), ">=",      &ty),
+        (format_ident!("{}_lt",     ident), "<",       &ty),
+        (format_ident!("{}_lte",    ident), "<=",      &ty),
       ];
 
 
-      if &db_type == "varchar" {
+      if &db_type == "varchar" || &db_type == "text" {
         comparisons.append(&mut vec![
           (format_ident!("{}_like",           ident), "LIKE",           &string_ty),
           (format_ident!("{}_not_like",       ident), "NOT LIKE",       &string_ty),
+          (format_ident!("{}_ilike",          ident), "ILIKE",          &string_ty),
+          (format_ident!("{}_not_ilike",      ident), "NOT ILIKE",      &string_ty),
           (format_ident!("{}_similar_to",     ident), "SIMILAR TO",     &string_ty),
           (format_ident!("{}_not_similar_to", ident), "NOT SIMILAR TO", &string_ty),
         ]);
@@ -346,6 +349,53 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
         comparison_types.push(rust_type.clone());
         where_clauses.push(
           format!("(NOT ${}::boolean OR {} {} ${}::{})",
+            field_position + 1,
+            &ident,
+            operator,
+            field_position + 2,
+            &db_type)
+        );
+        field_position += 2;
+
+        args.push(quote!{ self.#comparison_ident.is_some() });
+
+        // All search arguments must be Option<ty>.
+        // If the field already is an option (and maybe a nested option) we just flatten it.
+        if let Type::Path(TypePath{path: Path{ segments, .. }, .. }) = rust_type {
+          if &segments[0].ident.to_string() == "Option" {
+            args.push(quote!{ &self.#comparison_ident.clone().flatten() as &#rust_type });
+          } else {
+            args.push(quote!{ &self.#comparison_ident as &Option<#rust_type> });
+          };
+        }
+      }
+
+      let vec_of_ty: syn::Type = if let Type::Path(TypePath{path: Path{ segments, .. }, .. }) = &ty {
+        if &segments[0].ident.to_string() == "Option" {
+          match &segments[0].arguments {
+            PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments{ args, .. }) => {
+              let found = &args[0];
+              syn::parse_quote!{ Vec<#found> }
+            }
+            _ => panic!("Type {:?} is too complex. Only simple Option<type> are supported.", &ty)
+          }
+        } else {
+          syn::parse_quote!{ Vec<#ty> }
+        }
+      } else {
+        panic!("Type {:?} expected to be type or Option<type>", &ty);
+      };
+
+      let field_in_comparisons = vec![
+        (format_ident!("{}_in",     ident), "IN",      &vec_of_ty),
+        (format_ident!("{}_not_in", ident), "NOT IN",  &vec_of_ty),
+      ];
+        
+      for (comparison_ident, operator, rust_type) in field_in_comparisons.into_iter() {
+        comparison_idents.push(comparison_ident.clone());
+        comparison_types.push(rust_type.clone());
+        where_clauses.push(
+          format!("(NOT ${}::boolean OR {} {} (SELECT unnest(CAST(${} as {}[]))) )",
             field_position + 1,
             &ident,
             operator,
@@ -381,6 +431,7 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
         )
       );
       args.push(quote!{ self.#is_set_field_ident });
+
     });
   }
 

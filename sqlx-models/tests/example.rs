@@ -177,8 +177,22 @@ fn persons_crud() {
     let people_like_wai = app.person().select().alias_like(&"%wai%".to_string()).all().await.unwrap();
     assert_eq!(people_like_wai, vec![person.clone()]);
 
+    let people_ilike_wai = app.person().select().alias_ilike(&"%WAI%".to_string()).all().await.unwrap();
+    assert_eq!(people_ilike_wai, vec![person.clone()]);
+
+    let people_alias_in = app.person().select()
+      .alias_in(&vec!["wairi".to_string()]).all().await.unwrap();
+    assert_eq!(people_alias_in, vec![person.clone()]);
+
+    let people_alias_not_in = app.person().select()
+      .name_not_in(&vec!["Anonymous".to_string()]).all().await.unwrap();
+    assert_eq!(people_alias_not_in, vec![person.clone()]);
+
     let people_not_like_alan = app.person().select().name_not_like(&"%Alan%".to_string()).all().await.unwrap();
     assert_eq!(people_not_like_alan, vec![other_person.clone()]);
+
+    let people_not_ilike_alan = app.person().select().name_not_ilike(&"%aLAN%".to_string()).all().await.unwrap();
+    assert_eq!(people_not_ilike_alan, vec![other_person.clone()]);
 
     let people_similar_to_anon = app.person().select().name_similar_to(&"_nony%".to_string()).all().await.unwrap();
     assert_eq!(people_similar_to_anon, vec![other_person.clone()]);
