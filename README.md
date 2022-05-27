@@ -3,7 +3,7 @@
 [Latest Version]: https://img.shields.io/crates/v/sqlx_models.svg
 [crates.io]: https://crates.io/crates/sqlx_models
 
-** ActiveRecord pattern for Rust based on SQLx. Write idiomatic DB code (Postgres only). **
+**ActiveRecord pattern for Rust based on SQLx. Write idiomatic DB code (Postgres only).**
 
 ---
 
@@ -14,7 +14,7 @@ sqlx-models = "0.1"
 
 # Installation 
 
-Read the in-depth tutorial that doubles as a "kitchen sink" test in the [examples](https://github.com/constata-eu/sqlx-models-derive/blob/master/tests/examples.rs)
+Read the in-depth tutorial that doubles as a "kitchen sink" test in the [examples](https://github.com/constata-eu/sqlx-models-derive/blob/master/sqlx-models/tests/examples.rs)
 
 These are just some of the time-saving, boilerplate-killing features:
 
