@@ -3,7 +3,7 @@
 [Latest Version]: https://img.shields.io/crates/v/sqlx_models.svg
 [crates.io]: https://crates.io/crates/sqlx_models
 
-** ActiveRecord pattern for Rust based on SQLx. Write idiomatic DB code (Postgres only). **
+**ActiveRecord pattern for Rust based on SQLx. Write idiomatic DB code (Postgres only).**
 
 ---
 
