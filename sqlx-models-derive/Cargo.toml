@@ -12,9 +12,9 @@ keywords = ["sqlx", "postgres", "orm", "activerecord"]
 categories = ["database"]
 
 [dependencies]
-syn = { version = "*", features = ["extra-traits", "full"] }
-quote = "*"
-convert_case = "*"
+syn = { version = "1.0.86", features = ["extra-traits", "full"] }
+quote = "1.0.15"
+convert_case = "0.5.0"
 
 [lib]
 proc-macro = true
