@@ -29,6 +29,8 @@ mod kw {
   syn::custom_keyword!(table);
   syn::custom_keyword!(state);
   syn::custom_keyword!(queries);
+  syn::custom_keyword!(has_many);
+  syn::custom_keyword!(belongs_to);
   syn::custom_keyword!(default);
 }
 
@@ -50,6 +52,55 @@ impl Parse for Query {
       _ => Punctuated::new()
     };
     Ok(Query{ method_name, sql, args })
+  }
+}
+
+#[derive(Debug)]
+struct Association {
+  model_name: Ident,
+  column_name: Ident,
+}
+
+impl Parse for Association {
+  fn parse(input: ParseStream) -> Result<Self> {
+    let model_name: Ident = input.parse()?;
+    let content;
+    parenthesized!(content in input);
+    let column_name: Ident = content.parse()?;
+    Ok(Association{ model_name, column_name })
+  }
+}
+
+#[derive(Debug)]
+enum ModelConfig {
+  Queries(Punctuated<Query, Comma>),
+  HasMany(Punctuated<Association, Comma>),
+  BelongsTo(Punctuated<Association, Comma>),
+}
+
+impl Parse for ModelConfig {
+  fn parse(input: ParseStream) -> Result<Self> {
+    if input.peek(kw::queries) {
+      let _ = input.parse::<kw::queries>()?;
+      let content;
+      braced!(content in input);
+      let queries = content.parse_terminated(Query::parse)?;
+      Ok(ModelConfig::Queries(queries))
+    } else if input.peek(kw::has_many) {
+      let _ = input.parse::<kw::has_many>()?;
+      let content;
+      braced!(content in input);
+      let associations = content.parse_terminated(Association::parse)?;
+      Ok(ModelConfig::HasMany(associations))
+    } else if input.peek(kw::belongs_to) {
+      let _ = input.parse::<kw::belongs_to>()?;
+      let content;
+      braced!(content in input);
+      let associations = content.parse_terminated(Association::parse)?;
+      Ok(ModelConfig::BelongsTo(associations))
+    } else {
+      panic!("Unexpected model config name");
+    }
   }
 }
 
@@ -77,6 +128,8 @@ struct SqlxModelConf {
   table_name: Ident,
   fields: Punctuated<Field, Comma>,
   queries: Punctuated<Query, Comma>,
+  has_many: Punctuated<Association, Comma>,
+  belongs_to: Punctuated<Association, Comma>,
   hub_struct: Ident,
   sql_select_columns: String,
   field_idents: Vec<Ident>,
@@ -102,11 +155,18 @@ impl Parse for SqlxModelConf {
     };
 
     let mut queries: Punctuated<Query, Comma> = Punctuated::new();
+    let mut has_many: Punctuated<Association, Comma> = Punctuated::new();
+    let mut belongs_to: Punctuated<Association, Comma> = Punctuated::new();
+
     if input.parse::<Token![,]>().is_ok() {
-      let _ = input.parse::<kw::queries>()?;
-      let content;
-      braced!(content in input);
-      queries = content.parse_terminated(Query::parse)?;
+      let configs: Punctuated<ModelConfig, Comma> = input.parse_terminated(ModelConfig::parse)?;
+      for config in configs {
+        match config {
+          ModelConfig::Queries(a) => queries = a,
+          ModelConfig::HasMany(a) => has_many = a,
+          ModelConfig::BelongsTo(a) => belongs_to = a,
+        }
+      }
     }
 
     let extra_struct_attributes = whole_struct.attrs.clone();
@@ -141,6 +201,8 @@ impl Parse for SqlxModelConf {
       table_name,
       fields,
       queries,
+      has_many,
+      belongs_to,
       hub_struct,
       sql_select_columns,
       field_idents,
@@ -212,6 +274,54 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
   let field_types: Vec<Type> = conf.fields.clone().into_iter()
     .map(|i| i.ty ).collect();
 
+  let mut belongs_to_structs: Vec<Ident> = vec![];
+  let mut belongs_to_builders: Vec<Ident> = vec![];
+  let mut belongs_to_columns: Vec<Ident> = vec![];
+  let mut maybe_belongs_to_structs: Vec<Ident> = vec![];
+  let mut maybe_belongs_to_builders: Vec<Ident> = vec![];
+  let mut maybe_belongs_to_columns: Vec<Ident> = vec![];
+
+  for c in &conf.belongs_to {
+    let field = conf.fields.iter()
+      .find(|&x| x.ident.as_ref().unwrap().to_string() == c.column_name.to_string())
+      .expect(&format!("Belongs to column {:?} is not a field", c.column_name.to_string()));
+
+    let is_option = if let Type::Path(TypePath{path: Path{ segments, .. }, .. }) = &field.ty {
+      segments[0].ident.to_string() == "Option"
+    } else {
+      false
+    };
+
+    let builder = Ident::new(&c.model_name.to_string().to_case(Case::Snake), struct_name.span());
+
+    if is_option {
+      maybe_belongs_to_structs.push(c.model_name.clone());
+      maybe_belongs_to_columns.push(c.column_name.clone());
+      maybe_belongs_to_builders.push(builder);
+    } else {
+      belongs_to_structs.push(c.model_name.clone());
+      belongs_to_columns.push(c.column_name.clone());
+      belongs_to_builders.push(builder);
+    }
+  }
+
+  let mut has_many_structs:  Vec<Ident> = vec![];
+  let mut has_many_builders: Vec<Ident> = vec![];
+  let mut has_many_methods: Vec<Ident> = vec![];
+  let mut has_many_scope_methods: Vec<Ident> = vec![];
+  let mut has_many_select_structs: Vec<Ident> = vec![];
+  let mut has_many_columns:  Vec<Ident> = vec![];
+
+  for c in &conf.has_many {
+    let builder = Ident::new(&c.model_name.to_string().to_case(Case::Snake), struct_name.span());
+    has_many_methods.push(format_ident!("{}_vec", builder));
+    has_many_scope_methods.push(format_ident!("{}_scope", builder));
+    has_many_select_structs.push(format_ident!("Select{}Hub", c.model_name));
+    has_many_structs.push(c.model_name.clone());
+    has_many_columns.push(format_ident!("{}_eq",c.column_name));
+    has_many_builders.push(builder.clone());
+  }
+
   let field_attrs: Vec<Vec<Attribute>> = conf.fields.clone().into_iter().map(|field|{
     field.attrs.into_iter()
       .filter(|a| a.path != parse_str("sqlx_model_hints").unwrap() )
@@ -250,6 +360,34 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
       #(
         pub fn #field_idents<'a>(&'a self) -> &'a #field_types {
           &self.attrs.#field_idents
+        }
+      )*
+
+      #(
+        pub async fn #belongs_to_builders(&self) -> sqlx::Result<#belongs_to_structs> {
+          self.state.#belongs_to_builders().find(self.#belongs_to_columns()).await
+        }
+      )*
+
+      #(
+        pub async fn #maybe_belongs_to_builders(&self) -> sqlx::Result<Option<#maybe_belongs_to_structs>> {
+          if let Some(a) = self.#maybe_belongs_to_columns() {
+            self.state.#maybe_belongs_to_builders().find(a).await.map(Some)
+          } else {
+            Ok(None)
+          }
+        }
+      )*
+
+      #(
+        pub fn #has_many_scope_methods(&self) -> #has_many_select_structs {
+          self.state.#has_many_builders().select().#has_many_columns(self.id())
+        }
+      )*
+
+      #(
+        pub async fn #has_many_methods(&self) -> sqlx::Result<Vec<#has_many_structs>> {
+          self.#has_many_scope_methods().all().await
         }
       )*
     }
@@ -304,7 +442,9 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
 
   let mut comparison_idents: Vec<Ident> = vec![];
   let mut comparison_types: Vec<Type> = vec![];
-  let mut is_set_idents: Vec<Ident> = vec![];
+  let mut builder_method_simple_idents: Vec<Ident> = vec![];
+  let mut builder_method_simple_types: Vec<Type> = vec![];
+  let mut builder_method_string_idents: Vec<Ident> = vec![];
   let mut where_clauses = vec![];
   let mut args = vec![];
 
@@ -315,7 +455,22 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
 
   for field in conf.fields.clone().into_iter() {
     let ty = field.ty.clone();
-    let string_ty: syn::Type = syn::parse_quote!{ String };
+    let flat_ty: syn::Type = if let Type::Path(TypePath{path: Path{ segments, .. }, .. }) = &ty {
+      if &segments[0].ident.to_string() == "Option" {
+        match &segments[0].arguments {
+          PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments{ args, .. }) => {
+            let found = &args[0];
+            syn::parse_quote!{ #found }
+          }
+          _ => panic!("Type {:?} is too complex. Only simple Option<type> are supported.", &ty)
+        }
+      } else {
+        field.ty.clone()
+      }
+    } else {
+      panic!("Type {:?} expected to be type or Option<type>", &ty);
+    };
+
     let ident = &field.ident.as_ref().unwrap();
 
     field.attrs.iter().filter(|a| a.path == parse_str("sqlx_model_hints").unwrap() ).next().map(|found|{
@@ -324,27 +479,28 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
       let mut field_position = args.len();
 
       let mut comparisons = vec![
-        (format_ident!("{}_eq",     ident), "=",       &ty),
-        (format_ident!("{}_ne",     ident), "!=",      &ty),
-        (format_ident!("{}_gt",     ident), ">",       &ty),
-        (format_ident!("{}_gte",    ident), ">=",      &ty),
-        (format_ident!("{}_lt",     ident), "<",       &ty),
-        (format_ident!("{}_lte",    ident), "<=",      &ty),
+        (format_ident!("{}_eq",     ident), "=",       &flat_ty, true),
+        (format_ident!("{}_ne",     ident), "!=",      &flat_ty, true),
+        (format_ident!("{}_gt",     ident), ">",       &flat_ty, true),
+        (format_ident!("{}_gte",    ident), ">=",      &flat_ty, true),
+        (format_ident!("{}_lt",     ident), "<",       &flat_ty, true),
+        (format_ident!("{}_lte",    ident), "<=",      &flat_ty, true),
       ];
 
 
+      let string_ty: syn::Type = syn::parse_quote!{ String };
       if &db_type == "varchar" || &db_type == "text" {
         comparisons.append(&mut vec![
-          (format_ident!("{}_like",           ident), "LIKE",           &string_ty),
-          (format_ident!("{}_not_like",       ident), "NOT LIKE",       &string_ty),
-          (format_ident!("{}_ilike",          ident), "ILIKE",          &string_ty),
-          (format_ident!("{}_not_ilike",      ident), "NOT ILIKE",      &string_ty),
-          (format_ident!("{}_similar_to",     ident), "SIMILAR TO",     &string_ty),
-          (format_ident!("{}_not_similar_to", ident), "NOT SIMILAR TO", &string_ty),
+          (format_ident!("{}_like",           ident), "LIKE",           &string_ty, false),
+          (format_ident!("{}_not_like",       ident), "NOT LIKE",       &string_ty, false),
+          (format_ident!("{}_ilike",          ident), "ILIKE",          &string_ty, false),
+          (format_ident!("{}_not_ilike",      ident), "NOT ILIKE",      &string_ty, false),
+          (format_ident!("{}_similar_to",     ident), "SIMILAR TO",     &string_ty, false),
+          (format_ident!("{}_not_similar_to", ident), "NOT SIMILAR TO", &string_ty, false),
         ]);
       }
         
-      for (comparison_ident, operator, rust_type) in comparisons.into_iter() {
+      for (comparison_ident, operator, rust_type, simple_builder) in comparisons.into_iter() {
         comparison_idents.push(comparison_ident.clone());
         comparison_types.push(rust_type.clone());
         where_clauses.push(
@@ -358,34 +514,17 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
         field_position += 2;
 
         args.push(quote!{ self.#comparison_ident.is_some() });
+        args.push(quote!{ &self.#comparison_ident as &Option<#rust_type> });
 
-        // All search arguments must be Option<ty>.
-        // If the field already is an option (and maybe a nested option) we just flatten it.
-        if let Type::Path(TypePath{path: Path{ segments, .. }, .. }) = rust_type {
-          if &segments[0].ident.to_string() == "Option" {
-            args.push(quote!{ &self.#comparison_ident.clone().flatten() as &#rust_type });
-          } else {
-            args.push(quote!{ &self.#comparison_ident as &Option<#rust_type> });
-          };
+        if simple_builder {
+          builder_method_simple_idents.push(comparison_ident.clone());
+          builder_method_simple_types.push(rust_type.clone());
+        } else {
+          builder_method_string_idents.push(comparison_ident.clone());
         }
       }
 
-      let vec_of_ty: syn::Type = if let Type::Path(TypePath{path: Path{ segments, .. }, .. }) = &ty {
-        if &segments[0].ident.to_string() == "Option" {
-          match &segments[0].arguments {
-            PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments{ args, .. }) => {
-              let found = &args[0];
-              syn::parse_quote!{ Vec<#found> }
-            }
-            _ => panic!("Type {:?} is too complex. Only simple Option<type> are supported.", &ty)
-          }
-        } else {
-          syn::parse_quote!{ Vec<#ty> }
-        }
-      } else {
-        panic!("Type {:?} expected to be type or Option<type>", &ty);
-      };
-
+      let vec_of_ty: syn::Type = syn::parse_quote!{ Vec<#flat_ty> };
       let field_in_comparisons = vec![
         (format_ident!("{}_in",     ident), "IN",      &vec_of_ty),
         (format_ident!("{}_not_in", ident), "NOT IN",  &vec_of_ty),
@@ -405,21 +544,17 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
         field_position += 2;
 
         args.push(quote!{ self.#comparison_ident.is_some() });
+        args.push(quote!{ &self.#comparison_ident as &Option<#rust_type> });
 
-        // All search arguments must be Option<ty>.
-        // If the field already is an option (and maybe a nested option) we just flatten it.
-        if let Type::Path(TypePath{path: Path{ segments, .. }, .. }) = rust_type {
-          if &segments[0].ident.to_string() == "Option" {
-            args.push(quote!{ &self.#comparison_ident.clone().flatten() as &#rust_type });
-          } else {
-            args.push(quote!{ &self.#comparison_ident as &Option<#rust_type> });
-          };
-        }
+        builder_method_simple_idents.push(comparison_ident.clone());
+        builder_method_simple_types.push(rust_type.clone());
       }
 
       field_position += 1;
       let is_set_field_ident = format_ident!("{}_is_set", ident);
-      is_set_idents.push(is_set_field_ident.clone());
+      let bool_type: syn::Type = syn::parse_quote!{ bool };
+      comparison_idents.push(is_set_field_ident.clone());
+      comparison_types.push(bool_type.clone());
       where_clauses.push(
         format!(
           "(${}::boolean IS NULL OR ((${}::boolean AND {} IS NOT NULL) OR (NOT ${}::boolean AND {} IS NULL)))",
@@ -431,7 +566,8 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
         )
       );
       args.push(quote!{ self.#is_set_field_ident });
-
+      builder_method_simple_idents.push(is_set_field_ident.clone());
+      builder_method_simple_types.push(bool_type);
     });
   }
 
@@ -450,9 +586,6 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
   let select_struct_str = LitStr::new(&select_struct.to_string(), span);
 
   let comparison_idents_as_str: Vec<LitStr> = comparison_idents.iter()
-    .map(|i| LitStr::new(&i.to_string(), span) ).collect();
-
-  let is_set_idents_as_str: Vec<LitStr> = is_set_idents.iter()
     .map(|i| LitStr::new(&i.to_string(), span) ).collect();
 
   let query_for_find_sort_criteria: String = field_idents.iter().map(|f|{
@@ -485,12 +618,12 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
         #select_struct::new(self.state.clone())
       }
 
-      pub async fn find(&self, id: &#id_type) -> sqlx::Result<#struct_name> {
-        self.select().id_eq(&id).one().await
+      pub async fn find<T: std::borrow::Borrow<#id_type>>(&self, id: T) -> sqlx::Result<#struct_name> {
+        self.select().id_eq(id.borrow()).one().await
       }
 
-      pub async fn find_optional(&self, id: &#id_type) -> sqlx::Result<Option<#struct_name>> {
-        self.select().id_eq(&id).optional().await
+      pub async fn find_optional<T: std::borrow::Borrow<#id_type>>(&self, id: T) -> sqlx::Result<Option<#struct_name>> {
+        self.select().id_eq(id.borrow()).optional().await
       }
     }
 
@@ -513,7 +646,8 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
       }
     }
 
-    #[derive(Debug, Copy, Clone)]
+    #[derive(sqlx::Type, Debug, Copy, Clone)]
+    #[sqlx(type_name = "varchar", rename_all = "lowercase")]
     pub enum #model_order_by {
       #(#sort_variants,)*
     }
@@ -522,7 +656,6 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
     pub struct #select_struct {
       pub state: #state_name,
       #(pub #comparison_idents: Option<#comparison_types>,)*
-      #(pub #is_set_idents: Option<bool>,)*
       pub order_by: Option<#model_order_by>,
       pub desc: bool,
       pub limit: Option<i64>,
@@ -537,7 +670,6 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
          .field("limit", &self.limit)
          .field("offset", &self.offset)
           #(.field(#comparison_idents_as_str, &self.#comparison_idents))*
-          #(.field(#is_set_idents_as_str, &self.#is_set_idents))*
          .finish()
       }
     }
@@ -551,7 +683,6 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
           limit: None,
           offset: None,
           #(#comparison_idents: None,)*
-          #(#is_set_idents: None,)*
         }
       }
 
@@ -581,22 +712,23 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
       }
 
       #(
-        pub fn #comparison_idents(mut self, val: &#comparison_types) -> Self {
-          self.#comparison_idents = Some(val.clone());
+        pub fn #builder_method_simple_idents<T: std::borrow::Borrow<#builder_method_simple_types>>(mut self, val: T) -> Self {
+          self.#builder_method_simple_idents = Some(val.borrow().to_owned());
           self
         }
       )*
 
       #(
-        pub fn #is_set_idents(mut self, val: bool) -> Self {
-          self.#is_set_idents = Some(val);
+        pub fn #builder_method_string_idents<P: AsRef<str>>(mut self, val: P) -> Self
+        {
+          self.#builder_method_string_idents = Some(val.as_ref().into());
           self
         }
       )*
 
+
       pub fn use_struct(mut self, value: #select_attrs_struct) -> Self {
         #(self.#comparison_idents = value.#comparison_idents;)*
-        #(self.#is_set_idents = value.#is_set_idents;)*
         self.order_by = value.order_by;
         self.desc = value.desc;
         self.limit = value.limit;
@@ -682,7 +814,6 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
     #[derive(Debug, Default)]
     pub struct #select_attrs_struct {
       #(pub #comparison_idents: Option<#comparison_types>,)*
-      #(pub #is_set_idents: Option<bool>,)*
       pub order_by: Option<#model_order_by>,
       pub desc: bool,
       pub limit: Option<i64>,
@@ -790,7 +921,6 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
   let insert_struct = format_ident!("Insert{}Hub", &struct_name);
   let insert_struct_as_string = LitStr::new(&insert_struct.to_string(), span);
   let insert_attrs_struct = format_ident!("Insert{}", &struct_name);
-  let insert_struct_inner = format_ident!("Insert{}HubAttrs", &struct_name);
 
   let column_names_to_insert = fields_for_insert_idents.iter()
     .map(|f| f.to_string() )
@@ -810,59 +940,38 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
 
   quote!{
     impl #hub_struct {
-      pub fn insert(&self) -> #insert_struct {
-        #insert_struct::new(self.state.clone())
-      }
-    }
-
-    #[derive(Clone, Default)]
-    pub struct #insert_struct_inner {
-      #(pub #fields_for_insert_idents: Option<#fields_for_insert_types>,)*
-    }
-
-    impl #insert_struct_inner {
-      pub fn new(state: #state_name) -> Self {
-        Self{
-          #(#fields_for_insert_idents: None,)*
-        }
+      pub fn insert(&self, attrs: #insert_attrs_struct) -> #insert_struct {
+        #insert_struct::new(self.state.clone(), attrs)
       }
     }
 
     #[derive(Clone)]
     pub struct #insert_struct {
       pub state: #state_name,
-      pub attrs: #insert_struct_inner,
+      pub attrs: #insert_attrs_struct,
     }
 
     impl #insert_struct {
-      pub fn new(state: #state_name) -> Self {
-        Self{ state, attrs: Default::default() }
+      pub fn new(state: #state_name, attrs: #insert_attrs_struct) -> Self {
+        Self{ state, attrs }
       }
 
       #(
-        pub fn #fields_for_insert_idents(mut self, val: #fields_for_insert_types) -> Self {
-          self.attrs.#fields_for_insert_idents = Some(val);
-          self
+        pub fn #fields_for_insert_idents(&self) -> &#fields_for_insert_types {
+          &self.attrs.#fields_for_insert_idents
         }
       )*
 
-      pub fn use_struct(mut self, vals: #insert_attrs_struct) -> Self {
-        #(
-          self.attrs.#fields_for_insert_idents = Some(vals.#fields_for_insert_idents);
-        )*
+      pub fn use_struct(mut self, attrs: #insert_attrs_struct) -> Self {
+        self.attrs = attrs;
         self
       }
 
       pub async fn save(self) -> std::result::Result<#struct_name, sqlx::Error> {
-        #(
-          let #fields_for_insert_idents = self.attrs.#fields_for_insert_idents.clone()
-            .ok_or(sqlx::Error::ColumnNotFound(#fields_for_insert_as_string.to_string()))?;
-        )*
-
         let attrs = sqlx::query_as!(
           #attrs_struct,
           #query_for_insert,
-          #(#fields_for_insert_idents as #fields_for_insert_types),*
+          #(&self.attrs.#fields_for_insert_idents as &#fields_for_insert_types),*
         ).fetch_one(&self.state.db).await?;
 
         Ok(#struct_name::new(self.state.clone(), attrs))

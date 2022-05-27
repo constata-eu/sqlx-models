@@ -1,73 +1,117 @@
-ActiveRecord / Broker pattern for SQLX. (Postgres only for now)
+# Sqlx Models
 
-See a "kitchen sink" demo in the [examples](https://github.com/constata-eu/sqlx-models-derive/blob/master/tests/example.rs)
+[Latest Version]: https://img.shields.io/crates/v/sqlx_models.svg
+[crates.io]: https://crates.io/crates/sqlx_models
 
-A procedural macro that creates a family of types for your Postgres tables.
+** ActiveRecord pattern for Rust based on SQLx. Write idiomatic DB code (Postgres only). **
 
-Each resource access your custom application state, which must include a db connection or pool.
+---
 
-For a table called 'resources' it creates the following types for you:
+```toml
+[dependencies]
+sqlx-models = "0.1"
+```
 
-ResourceHub:
-  It's the global broker for Resources. It's where you can create new resources or query the existing ones.
-  It also 'impls' a method '.resurce()' in your custom state struct so you always have the hub at hand.
+# Installation 
 
-NewResource (and NewResourceAttrs):
-  It's a resource that has not been stored yet and does not have an ID. It can be used as a builder
-  chaining methods that will set values on all columns, or alternatively you can
-  use the NewResourceAttrs struct to deserialize your fields from json, and have a compile time guarentee
-  that you're not missing any fields.
-  Once you're done building, it can be saved to a resource.
-  You create a NewResource from the ResourceHub method '.build()'
-  If you want to do anything before/after saving, you may implement your own method for NewResource,
-  calling self.save() as needed. See the tests/example.rs.
+Read the in-depth tutorial that doubles as a "kitchen sink" test in the [examples](https://github.com/constata-eu/sqlx-models-derive/blob/master/tests/examples.rs)
 
-Resource (and ResourceAttrs):
-  The Resource struct has two main fields, a pointer to your app state and attrs (ResourceAttrs).
-  It has methods to update and delete the resource attributes.
-  You get a Resource instance from the ResourceHub method '.query()...' or by saving a NewResource.
-  Your business logic regarding these models will be most likely implemented as new methods for
-  the Resource struct. See tests/example.rs.
+These are just some of the time-saving, boilerplate-killing features:
 
-ResourceQuery:
-  It's a struct of Optional fields, each describing parameters to be set in the where clause of the query
-  used to fetch 'resources'. The searching functions are limited to checking for equality of a field or
-  to see if a database column was null (or not null). All conditions are AND'ed together.
-  Anything more complex warrants falling back to sqlx.
+## Model
+```rust
+  make_sqlx_model!{
+    state: App,
+    table: humans,
+    struct Human {
+      #[sqlx_model_hints(int4, default)]
+      id: i32,
+      #[sqlx_model_hints(varchar)]
+      name: String,
+      #[sqlx_model_hints(int4)]
+      age: Option<i32>,
+      #[sqlx_model_hints(boolean, default)]
+      is_allowed_unlimited_cats: bool,
+      #[sqlx_model_hints(boolean)]
+      likes_dogs_too: bool,
+    },
+    has_many {
+      Cat(human_id),
+    }
+  }
+```
 
+## Create
+```rust
+  let alice = app.human()
+    .insert(InsertHuman{
+      name: "Alice".to_string(),
+      age: Some(19),
+      likes_dogs_too: true,
+    })
+    .save().await?;
 
-Main features, caveats, and design principles:
+  assert_eq!(alice.attrs, HumanAttrs{
+    id: 1,
+    name: "Alice".to_string(),
+    age: Some(19),
+    is_allowed_unlimited_cats: false,
+    likes_dogs_too: true,
+  });
+```
 
-- Users should not be passing a connection or pool explicitly to every method. The connection is implicit state.
-- Your base state *must* have an attribute called 'db' that has a connection or pool.
-- We must keep structs and fields public. These types are your types. These are your abstractions.
-- This should be easy to learn and use, even if there were performance tradeoffs.
-- Always make it possible to fall back to sqlx core methods for custom queries and performance enhancements.
-- Use compile-time checked queries exclusively.
-- Only Postgres is supported at this point.
-- Only fetch one resource per query. Reinventing SQL for joining tables in the ORM is hard to maintain, and impossible to debug and understand for users.
-- Only one query per method. Combining multiple resources, or calling some code before or after saving should be done in custom methods implemented by the user on the main Resource struct.
+## Query
+```rust
+  let some_humans = app.human()
+    .select()
+    .limit(2)
+    .offset(1)
+    .likes_dogs_too_eq(false)
+    .order_by(HumanOrderBy::Name)
+    .desc(true)
+    .all().await?;
 
+  assert_eq!(some_humans, vec![alice]);
+```
 
-TODO:
-- Add "in" and not_in filters for all fields.
-- Add ilike and not_ilike to varchar fields.
-- Add lenses.
-- Add automatic relationships.
+## Update
+```rust
+  alice = alice.update().use_struct(UpdateHuman{
+    name: Some("Alice Alison".to_string()),
+    age: Some(None),
+    is_allowed_unlimited_cats: Some(true),
+    ..Default::default()
+  }).save().await?;
 
-- Write readme.
-  - Setup.
-  - Modeling columns and relationships.
-  - Inserting.
-  - Updating.
-  - Deleting.
-  - Selecting.
-    - Filters.
-    - Scopes.
-    - Traits for selecting.
-  - Lenses (almost state machines.)
-  
-  - Recipes:
-    - Model with default and non-default values.
-    - State machines with lenses.
-    
+  assert_eq!(alice.attrs, HumanAttrs{
+    id: 1,
+    name: "Alice Alison".to_string(),
+    age: None,
+    is_allowed_unlimited_cats: true,
+    likes_dogs_too: true,
+  });
+```
+
+## Delete
+```rust
+  alice.delete().await?;
+```
+
+## Design principles:
+
+- Stateful:
+  You're not supposed to be passing a connection pool around explicitly.
+- Your structs, your abstractions:
+  This crate has a proc macro that creates a number of structs for different operations
+  on a single database table. You can add any methods you want to any of these structs.
+  Structs for the same operation in different tables implement a common trait to allow some degree of generalization across operations in these tables.
+- Idiomatic rather than performant:
+  This should be easy to learn and use, even if there were performance tradeoffs.
+- Fallaback to SQLx:
+  Always make it possible to fall back for custom queries and performance enhancements.
+- One table per query.
+  Reinventing SQL for joining tables in the ORM is hard to debug and understand.
+  Favour multiple single-table queries over a single multi-table one. (see previous item).
+- Only compile time checked queries.
+  No chance of sql injection, no need for silly tests, at the cost of longer queries.
+- Only Postgres for now. Sorry about that :(
