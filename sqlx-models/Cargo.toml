@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 authors = ["Nubis <nubis@constata.eu>"]
-rust-version = "1.51"
+rust-version = "1.56"
 license = "MIT OR Apache-2.0"
 description = "ActiveRecord based on SQLx for Postgres"
 homepage = "https://github.com/constata-eu/sqlx-models"
