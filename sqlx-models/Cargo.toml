@@ -3,8 +3,17 @@ name = "sqlx-models"
 version = "0.1.0"
 edition = "2021"
 
+authors = ["Nubis <nubis@constata.eu>"]
+rust-version = "1.51"
+license = "MIT OR Apache-2.0"
+description = "ActiveRecord based on SQLx for Postgres"
+homepage = "https://github.com/constata-eu/sqlx-models"
+repository = "https://github.com/constata-eu/sqlx-models"
+keywords = ["sqlx", "postgres", "orm", "activerecord"]
+categories = ["database"]
+
 [dependencies]
-sqlx-models-derive = { path = "../sqlx-models-derive" }
+sqlx-models-derive = { version = "0.1", path = "../sqlx-models-derive" }
 async-trait = "0.1.52"
 sqlx = { version = "0.5.2", features = [ "runtime-tokio-native-tls" ] }
 

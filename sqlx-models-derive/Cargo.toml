@@ -2,6 +2,14 @@
 name = "sqlx-models-derive"
 version = "0.1.0"
 edition = "2021"
+authors = ["Nubis <nubis@constata.eu>"]
+rust-version = "1.51"
+license = "MIT OR Apache-2.0"
+description = "Procedural macros for sqlx-models"
+homepage = "https://github.com/constata-eu/sqlx-models"
+repository = "https://github.com/constata-eu/sqlx-models"
+keywords = ["sqlx", "postgres", "orm", "activerecord"]
+categories = ["database"]
 
 [dependencies]
 syn = { version = "*", features = ["extra-traits", "full"] }
