@@ -76,14 +76,14 @@ These are just some of the time-saving, boilerplate-killing features:
 
 ## Update
 ```rust
-  alice = alice.update().use_struct(UpdateHuman{
+  let updated_alice = alice.update().use_struct(UpdateHuman{
     name: Some("Alice Alison".to_string()),
     age: Some(None),
     is_allowed_unlimited_cats: Some(true),
     ..Default::default()
   }).save().await?;
 
-  assert_eq!(alice.attrs, HumanAttrs{
+  assert_eq!(updated_alice.attrs, HumanAttrs{
     id: 1,
     name: "Alice Alison".to_string(),
     age: None,
