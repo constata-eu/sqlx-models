@@ -9,7 +9,7 @@
 
 ```toml
 [dependencies]
-sqlx-models = "0.1"
+sqlx-models-orm = "0.1"
 ```
 
 # Installation 
