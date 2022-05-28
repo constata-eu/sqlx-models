@@ -1,4 +1,4 @@
-use sqlx_models_orm::make_sqlx_model;
+use sqlx_models_orm::model;
 use serde_with::{serde_as, DisplayFromStr};
 use serde::{Serialize, Deserialize};
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -81,13 +81,13 @@ async fn tutorial() -> anyhow::Result<()> {
     To interact with the 'humans' table, we define this Human model.
     We also define associations to other models and custom queries with
     complex where clauses or even subqueries.
-    The make_sqlx_model proc macro will create multiple helper structs to perform
+    The model proc macro will create multiple helper structs to perform
     insert, select, update and delete operations.
     These structs will be in your crate so you can implement
     your business logic in them.
   */
 
-  make_sqlx_model!{
+  model!{
     state: App,
     table: humans, // The database table name this model represents.
 
@@ -264,7 +264,7 @@ async fn tutorial() -> anyhow::Result<()> {
    at the database level.
    This model also introduces belongs_to associations.
   */
-  make_sqlx_model!{
+  model!{
     state: App,
     table: cats,
     struct Cat {
@@ -355,7 +355,7 @@ async fn tutorial() -> anyhow::Result<()> {
     that joins many cats with many toys.
   */
 
-  make_sqlx_model!{
+  model!{
     state: App,
     table: toys,
     struct Toy {
@@ -374,7 +374,7 @@ async fn tutorial() -> anyhow::Result<()> {
     }
   }
 
-  make_sqlx_model!{
+  model!{
     state: App,
     table: cats_toys,
     struct CatToy {
@@ -621,7 +621,7 @@ async fn tutorial() -> anyhow::Result<()> {
     This is useful for making your models lightweight when you have many
     columns or blobs that you don't want to retrieve from the DB all the time.
   */
-  make_sqlx_model!{
+  model!{
     state: App,
     table: humans,
     struct AlternateHuman {

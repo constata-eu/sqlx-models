@@ -212,7 +212,7 @@ impl Parse for SqlxModelConf {
 }
 
 #[proc_macro]
-pub fn make_sqlx_model(tokens: TokenStream) -> TokenStream {
+pub fn model(tokens: TokenStream) -> TokenStream {
   let conf = parse_macro_input!(tokens as SqlxModelConf);
   let state_name = &conf.state_name;
   let hub_struct = &conf.hub_struct;

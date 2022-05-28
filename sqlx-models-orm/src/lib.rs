@@ -1,4 +1,4 @@
-pub use sqlx_models_derive::make_sqlx_model;
+pub use sqlx_models_derive::model;
 pub use async_trait::async_trait;
 
 pub trait SqlxModel: Send + Sync + Sized {

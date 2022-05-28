@@ -17,7 +17,7 @@ These are just some of the time-saving, boilerplate-killing features:
 
 ## Model
 ```rust
-  make_sqlx_model!{
+  model!{
     state: App,
     table: humans,
     struct Human {
