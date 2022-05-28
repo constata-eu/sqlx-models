@@ -1,4 +1,4 @@
-# Sqlx Models
+# Sqlx Models ORM
 
 **ActiveRecord pattern for Rust based on SQLx. Write idiomatic DB code (Postgres only).**
 
