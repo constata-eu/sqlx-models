@@ -11,7 +11,7 @@ sqlx-models-orm = "0.1"
 
 # Installation 
 
-Read the in-depth tutorial that doubles as a "kitchen sink" test in the [examples](https://github.com/constata-eu/sqlx-models-derive/blob/master/sqlx-models/tests/examples.rs)
+Read the in-depth tutorial that doubles as a "kitchen sink" test in the [examples](https://github.com/constata-eu/sqlx-models/blob/master/sqlx-models-orm/tests/examples.rs)
 
 These are just some of the time-saving, boilerplate-killing features:
 
