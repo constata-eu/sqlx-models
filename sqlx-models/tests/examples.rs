@@ -1,4 +1,4 @@
-use sqlx_models_derive::make_sqlx_model;
+use sqlx_models_orm::make_sqlx_model;
 use serde_with::{serde_as, DisplayFromStr};
 use serde::{Serialize, Deserialize};
 use sqlx::postgres::{PgPool, PgPoolOptions};

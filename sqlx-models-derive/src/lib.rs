@@ -392,8 +392,8 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
       )*
     }
 
-    #[sqlx_models::async_trait]
-    impl sqlx_models::SqlxModel for #struct_name {
+    #[sqlx_models_orm::async_trait]
+    impl sqlx_models_orm::SqlxModel for #struct_name {
       type State = #state_name;
       type SelectModelHub = #select_struct;
       type SelectModel = #select_attrs_struct;
@@ -627,8 +627,8 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
       }
     }
 
-    #[sqlx_models::async_trait]
-    impl sqlx_models::SqlxModelHub<#struct_name> for #hub_struct {
+    #[sqlx_models_orm::async_trait]
+    impl sqlx_models_orm::SqlxModelHub<#struct_name> for #hub_struct {
       fn from_state(state: #state_name) -> Self {
         #hub_struct::new(state)
       }
@@ -764,8 +764,8 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
       }
     }
 
-    #[sqlx_models::async_trait]
-    impl sqlx_models::SqlxSelectModelHub<#struct_name> for #select_struct {
+    #[sqlx_models_orm::async_trait]
+    impl sqlx_models_orm::SqlxSelectModelHub<#struct_name> for #select_struct {
       fn from_state(state: #state_name) -> Self {
         #select_struct::new(state)
       }
