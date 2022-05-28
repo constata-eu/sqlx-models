@@ -1,6 +1,6 @@
 [workspace]
 members = [
   "sqlx-models-derive",
-  "sqlx-models",
+  "sqlx-models-orm",
 ]
 
