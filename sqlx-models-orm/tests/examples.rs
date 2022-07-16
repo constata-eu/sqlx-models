@@ -1,7 +1,6 @@
-use sqlx_models_orm::model;
+use sqlx_models_orm::{Db, model};
 use serde_with::{serde_as, DisplayFromStr};
 use serde::{Serialize, Deserialize};
-use sqlx::postgres::{PgPool, PgPoolOptions};
 
 macro_rules! assert_vec {
   ($e:expr, $($i:ident),*) => (
@@ -64,13 +63,13 @@ async fn tutorial() -> anyhow::Result<()> {
   */
   #[derive(Clone)]
   pub struct App {
-    db: PgPool,
+    db: Db,
     max_cats_per_human: i64,
   }
 
   impl App {
     async fn new(connection_string: &str) -> Self {
-      let db = PgPoolOptions::new().connect(connection_string).await.unwrap();
+      let db = Db::connect(connection_string).await.unwrap();
       Self{db, max_cats_per_human: 2}
     } 
   }
@@ -641,6 +640,67 @@ async fn tutorial() -> anyhow::Result<()> {
     likes_dogs_too: true,
     is_allowed_unlimited_cats: true,
   }).save().await?;
+
+  /*
+   * Transactions are supported too for all operations.
+  */
+
+  assert_eq!(4, app.cat().select().count().await?);
+  assert!(app.cat().find_optional("Felix".to_string()).await?.is_some());
+  assert_eq!("Bob", *app.cat().find("Tom".to_string()).await?.human().await?.unwrap().name());
+
+  // When cat_tx is dropped, the transaction is rolled back.
+  {
+    let cat_tx = app.cat().transactional().await?;
+    cat_tx
+      .insert(("Juancito", Personality::Playful, None).into())
+      .validate_and_save().await?;
+    cat_tx
+      .insert(("Josecito", Personality::Playful, None).into())
+      .validate_and_save().await?;
+    cat_tx.find("Garfield".to_string()).await?.delete().await?;
+    cat_tx.find("Tom".to_string()).await?.human().await?.unwrap()
+      .update().name("Roberto".to_string()).save().await?;
+
+    assert_eq!(5, cat_tx.select().count().await?);
+    assert!(cat_tx.find_optional("Garfield".to_string()).await?.is_none());
+    assert_eq!("Roberto", *cat_tx.find("Tom".to_string()).await?.human().await?.unwrap().name());
+
+    // Outside the transaction things stay the same.
+    assert_eq!(4, app.cat().select().count().await?);
+    assert!(app.cat().find_optional("Felix".to_string()).await?.is_some());
+    assert_eq!("Bob", *app.cat().find("Tom".to_string()).await?.human().await?.unwrap().name());
+  }
+
+  // And remain the same after the transaction is dropped.
+  assert_eq!(4, app.cat().select().count().await?);
+  assert!(app.cat().find_optional("Felix".to_string()).await?.is_some());
+  assert_eq!("Bob", *app.cat().find("Tom".to_string()).await?.human().await?.unwrap().name());
+
+
+  // But if we try again and commit it, it works.
+  {
+    let cat_tx = app.cat().transactional().await?;
+    cat_tx
+      .insert(("Juancito", Personality::Playful, None).into())
+      .validate_and_save().await?;
+    cat_tx
+      .insert(("Josecito", Personality::Playful, None).into())
+      .validate_and_save().await?;
+    cat_tx.find("Garfield".to_string()).await?.delete().await?;
+    cat_tx.find("Tom".to_string()).await?.human().await?.unwrap()
+      .update().name("Roberto".to_string()).save().await?;
+
+    assert_eq!(5, cat_tx.select().count().await?);
+    assert!(cat_tx.find_optional("Garfield".to_string()).await?.is_none());
+    assert_eq!("Roberto", *cat_tx.find("Tom".to_string()).await?.human().await?.unwrap().name());
+    cat_tx.commit().await.unwrap();
+  }
+
+  // Outside the transaction changes have been applied.
+  assert_eq!(5, app.cat().select().count().await?);
+  assert!(app.cat().find_optional("Garfield".to_string()).await?.is_none());
+  assert_eq!("Roberto", *app.cat().find("Tom".to_string()).await?.human().await?.unwrap().name());
 
   Ok(())
 }

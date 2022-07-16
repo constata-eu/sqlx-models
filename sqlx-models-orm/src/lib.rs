@@ -33,3 +33,87 @@ pub trait SqlxSelectModelHub<Model: SqlxModel>: Send + Sync + Sized {
   async fn optional(&self) -> sqlx::Result<Option<Model>>;
 }
 
+use sqlx::{Postgres, Transaction, query::*, postgres::*};
+
+pub type PgTx = Option<std::sync::Arc<futures_util::lock::Mutex<Option<Transaction<'static, Postgres>>>>>;
+pub type PgQuery<'q> = Query<'q, Postgres, PgArguments>;
+pub type PgMap<'q, O> = Map<'q, Postgres, O, PgArguments>;
+pub type PgQueryScalar<'q, O> = QueryScalar<'q, Postgres, O, PgArguments>;
+
+#[derive(Clone, Debug)]
+pub struct Db {
+  pub pool: PgPool,
+  pub transaction: PgTx,
+}
+
+macro_rules! choose_executor {
+  ($self:ident, $query:ident, $method:ident) => ({
+    if let Some(a) = $self.transaction.as_ref() {
+      let mut mutex = a.lock().await;
+      if let Some(tx) = &mut *mutex {
+        return $query.$method(&mut *tx).await;
+      }
+    }
+    $query.$method(&$self.pool).await
+  })
+}
+
+impl Db {
+  pub async fn connect(connection_string: &str) -> sqlx::Result<Self> {
+    let pool = PgPoolOptions::new().connect(connection_string).await?;
+    Ok(Self{ pool, transaction: None })
+  } 
+
+  pub async fn transaction(&self) -> sqlx::Result<Self> {
+    let tx = self.pool.begin().await?;
+    Ok(Self{ pool: self.pool.clone(), transaction: Some(std::sync::Arc::new(futures_util::lock::Mutex::new(Some(tx))))})
+  }
+
+  pub async fn execute<'a>(&self, query: PgQuery<'a>) -> sqlx::Result<sqlx::postgres::PgQueryResult> {
+    choose_executor!(self, query, execute)
+  }
+
+  pub async fn fetch_one<'a, T, F>(&self, query: PgMap<'a, F>) -> sqlx::Result<T>
+    where
+      F: FnMut(PgRow) -> Result<T, Error> + Send,
+      T: Unpin + Send,
+  {
+    choose_executor!(self, query, fetch_one)
+  }
+
+  pub async fn fetch_all<'a, T, F>(&self, query: PgMap<'a, F>) -> sqlx::Result<Vec<T>>
+    where
+      F: FnMut(PgRow) -> Result<T, Error> + Send,
+      T: Unpin + Send,
+  {
+    choose_executor!(self, query, fetch_all)
+  }
+
+  pub async fn fetch_optional<'a, T, F>(&self, query: PgMap<'a, F>) -> sqlx::Result<Option<T>>
+    where
+      F: FnMut(PgRow) -> Result<T, Error> + Send,
+      T: Unpin + Send,
+  {
+    choose_executor!(self, query, fetch_optional)
+  }
+
+  pub async fn fetch_one_scalar<'a, T>(&self, query: PgQueryScalar<'a, T>) -> sqlx::Result<T>
+    where
+      (T,): for<'r> sqlx::FromRow<'r, PgRow>,
+      T: Unpin + Send,
+  {
+    choose_executor!(self, query, fetch_one)
+  }
+
+  pub async fn commit(&self) -> sqlx::Result<()> {
+    if let Some(arc) = self.transaction.as_ref() {
+      let mut mutex = arc.lock().await;
+      let maybe_tx = (&mut *mutex).take();
+      if let Some(tx) = maybe_tx {
+        tx.commit().await?;
+      }
+    }
+    Ok(())
+  }
+}
+

@@ -1,3 +1,8 @@
+/// Usar el Db en vez de directamente el PgPool 
+/// La transacción no es global (por performance, para no hacer locking).
+/// Una vez que hubo una transacción, siempre se va a preguntar.
+/// Luego del commit todos los usuarios del mismo Arc siguen preguntando.
+
 extern crate proc_macro;
 use convert_case::{Case, Casing};
 use proc_macro::TokenStream;
@@ -239,6 +244,16 @@ pub fn model(tokens: TokenStream) -> TokenStream {
     impl #hub_struct {
       pub fn new(state: #state_name) -> Self {
         Self{ state }
+      }
+
+      pub async fn transactional(mut self) -> sqlx::Result<Self> {
+        self.state.db = self.state.db.transaction().await?;
+        Ok(self)
+      }
+
+      pub async fn commit(&self) -> sqlx::Result<()> {
+        self.state.db.commit().await?;
+        Ok(())
       }
     }
 
@@ -737,25 +752,21 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
       }
 
       pub async fn all(&self) -> sqlx::Result<Vec<#struct_name>> {
-        let attrs = sqlx::query_as!(#attrs_struct, #query_for_find, #(#args),*)
-          .fetch_all(&self.state.db).await?;
+        let attrs = self.state.db.fetch_all(sqlx::query_as!(#attrs_struct, #query_for_find, #(#args),*)).await?;
         Ok(attrs.into_iter().map(|a| self.resource(a) ).collect())
       }
 
       pub async fn count(&self) -> sqlx::Result<i64> {
-        sqlx::query_scalar!(#query_for_count, #(#args_for_count),*)
-          .fetch_one(&self.state.db).await
+        self.state.db.fetch_one_scalar(sqlx::query_scalar!(#query_for_count, #(#args_for_count),*)).await
       }
 
       pub async fn one(&self) -> sqlx::Result<#struct_name> {
-        let attrs = sqlx::query_as!(#attrs_struct, #query_for_find, #(#args),*)
-          .fetch_one(&self.state.db).await?;
+        let attrs = self.state.db.fetch_one(sqlx::query_as!(#attrs_struct, #query_for_find, #(#args),*)).await?;
         Ok(self.resource(attrs))
       }
 
       pub async fn optional(&self) -> sqlx::Result<Option<#struct_name>> {
-        let attrs = sqlx::query_as!(#attrs_struct, #query_for_find, #(#args),*)
-          .fetch_optional(&self.state.db).await?;
+        let attrs = self.state.db.fetch_optional(sqlx::query_as!(#attrs_struct, #query_for_find, #(#args),*)).await?;
         Ok(attrs.map(|a| self.resource(a)))
       }
 
@@ -857,23 +868,17 @@ fn build_queries(conf: &SqlxModelConf) -> Vec<TokenStream2> {
         }
 
         pub async fn all(&self) -> sqlx::Result<Vec<#struct_name>> {
-          let attrs = sqlx::query_as!(#attrs_struct, #query, #(&self.#arg_names as &#arg_types),*)
-            .fetch_all(&self.state.db).await?;
-
+          let attrs = self.state.db.fetch_all(sqlx::query_as!(#attrs_struct, #query, #(&self.#arg_names as &#arg_types),*)).await?;
           Ok(attrs.into_iter().map(|a| self.init(a) ).collect())
         }
 
         pub async fn one(&self) -> sqlx::Result<#struct_name> {
-          let attrs = sqlx::query_as!(#attrs_struct, #query, #(&self.#arg_names as &#arg_types),*)
-            .fetch_one(&self.state.db).await?;
-
+          let attrs = self.state.db.fetch_one(sqlx::query_as!(#attrs_struct, #query, #(&self.#arg_names as &#arg_types),*)).await?;
           Ok(self.init(attrs))
         }
 
         pub async fn optional(&self) -> sqlx::Result<Option<#struct_name>> {
-          let attrs = sqlx::query_as!(#attrs_struct, #query, #(&self.#arg_names as &#arg_types),*)
-            .fetch_optional(&self.state.db).await?;
-
+          let attrs = self.state.db.fetch_optional(sqlx::query_as!(#attrs_struct, #query, #(&self.#arg_names as &#arg_types),*)).await?;
           Ok(attrs.map(|a| self.init(a)))
         }
       }
@@ -952,7 +957,10 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
     }
 
     impl #insert_struct {
-      pub fn new(state: #state_name, attrs: #insert_attrs_struct) -> Self {
+      pub fn new(
+        state: #state_name,
+        attrs: #insert_attrs_struct
+      ) -> Self {
         Self{ state, attrs }
       }
 
@@ -968,11 +976,13 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
       }
 
       pub async fn save(self) -> std::result::Result<#struct_name, sqlx::Error> {
-        let attrs = sqlx::query_as!(
-          #attrs_struct,
-          #query_for_insert,
-          #(&self.attrs.#fields_for_insert_idents as &#fields_for_insert_types),*
-        ).fetch_one(&self.state.db).await?;
+        let attrs = self.state.db.fetch_one(
+          sqlx::query_as!(
+            #attrs_struct,
+            #query_for_insert,
+            #(&self.attrs.#fields_for_insert_idents as &#fields_for_insert_types),*
+          )
+        ).await?;
 
         Ok(#struct_name::new(self.state.clone(), attrs))
       }
@@ -1080,12 +1090,14 @@ fn build_update(conf: &SqlxModelConf) -> TokenStream2 {
       }
 
       pub async fn save(self) -> std::result::Result<#struct_name, sqlx::Error> {
-        let attrs = sqlx::query_as!(
-          #attrs_struct,
-          #query_for_update,
-          self.id,
-          #(#args_for_update),*
-        ).fetch_one(&self.state.db).await?;
+        let attrs = self.state.db.fetch_one(
+          sqlx::query_as!(
+            #attrs_struct,
+            #query_for_update,
+            self.id,
+            #(#args_for_update),*
+          )
+        ).await?;
 
         Ok(#struct_name::new(self.state.clone(), attrs))
       }
@@ -1108,7 +1120,7 @@ fn build_delete(conf: &SqlxModelConf) -> TokenStream2 {
   quote!{
     impl #struct_name {
       pub async fn delete(self) -> sqlx::Result<()> {
-        sqlx::query!(#query_for_delete, self.attrs.id).execute(&self.state.db).await?;
+        self.state.db.execute(sqlx::query!(#query_for_delete, self.attrs.id)).await?;
         Ok(())
       }
     }
