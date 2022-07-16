@@ -34,7 +34,7 @@ pub trait SqlxSelectModelHub<Model: SqlxModel>: Send + Sync + Sized {
   async fn optional(&self) -> sqlx::Result<Option<Model>>;
 }
 
-use sqlx::{Postgres, Transaction, query::*, postgres::*};
+pub use sqlx::{Postgres, Transaction, query::*, postgres::*, Error};
 
 pub type PgTx = Option<std::sync::Arc<futures_util::lock::Mutex<Option<Transaction<'static, Postgres>>>>>;
 pub type PgQuery<'q> = Query<'q, Postgres, PgArguments>;
@@ -76,7 +76,7 @@ impl Db {
 
   pub async fn fetch_one<'a, T, F>(&self, query: PgMap<'a, F>) -> sqlx::Result<T>
     where
-      F: FnMut(PgRow) -> Result<T, Error> + Send,
+      F: FnMut(sqlx::postgres::PgRow) -> Result<T, Error> + Send,
       T: Unpin + Send,
   {
     choose_executor!(self, query, fetch_one)
