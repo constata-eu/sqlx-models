@@ -1,5 +1,6 @@
 pub use sqlx_models_derive::model;
 pub use async_trait::async_trait;
+pub use sqlx;
 
 pub trait SqlxModel: Send + Sync + Sized {
   type State: Send + Sync;

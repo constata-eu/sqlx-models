@@ -15,7 +15,7 @@ categories = ["database"]
 [dependencies]
 sqlx-models-derive = { version = "0.1.2", path = "../sqlx-models-derive" }
 async-trait = "0.1.52"
-sqlx = { version = "0.5.2", features = [ "runtime-tokio-native-tls" ] }
+sqlx = { version = "0.6", features = [ "runtime-tokio-native-tls" ] }
 futures-core = "^0.3.19"
 futures-util = "^0.3.19"
 
