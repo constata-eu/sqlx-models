@@ -702,6 +702,13 @@ async fn tutorial() -> anyhow::Result<()> {
   assert!(app.cat().find_optional("Garfield".to_string()).await?.is_none());
   assert_eq!("Roberto", *app.cat().find("Tom".to_string()).await?.human().await?.unwrap().name());
 
+
+  // Query helpers are available to fall back to sqlx queries but execute them in the
+  // global transaction or a new connection.
+  let db = app.cat().transactional().await?.state.db;
+  assert_eq!(1, db.fetch_one(sqlx::query!("select id from humans order by id")).await?.id);
+  assert_eq!(5, db.fetch_all(sqlx::query!("select id from cats")).await?.len());
+
   Ok(())
 }
 

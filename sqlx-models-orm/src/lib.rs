@@ -59,6 +59,30 @@ macro_rules! choose_executor {
   })
 }
 
+macro_rules! define_query_method {
+  ($method:ident, $return:ty) => (
+    pub async fn $method<'a, T, F>(&self, query: PgMap<'a, F>) -> sqlx::Result<$return>
+      where
+        F: FnMut(sqlx::postgres::PgRow) -> Result<T, Error> + Send,
+        T: Unpin + Send,
+    {
+      choose_executor!(self, query, $method)
+    }
+  )
+}
+
+macro_rules! define_query_scalar_method {
+  ($method:ident, $inner_method:ident, $return:ty) => (
+    pub async fn $method<'a, T>(&self, query: PgQueryScalar<'a, T>) -> sqlx::Result<$return>
+      where
+        (T,): for<'r> sqlx::FromRow<'r, PgRow>,
+        T: Unpin + Send,
+    {
+      choose_executor!(self, query, $inner_method)
+    }
+  )
+}
+
 impl Db {
   pub async fn connect(connection_string: &str) -> sqlx::Result<Self> {
     let pool = PgPoolOptions::new().connect(connection_string).await?;
@@ -70,41 +94,17 @@ impl Db {
     Ok(Self{ pool: self.pool.clone(), transaction: Some(std::sync::Arc::new(futures_util::lock::Mutex::new(Some(tx))))})
   }
 
-  pub async fn execute<'a>(&self, query: PgQuery<'a>) -> sqlx::Result<sqlx::postgres::PgQueryResult> {
+  pub async fn execute<'a>(&self, query: PgQuery<'a>) -> sqlx::Result<PgQueryResult> {
     choose_executor!(self, query, execute)
   }
 
-  pub async fn fetch_one<'a, T, F>(&self, query: PgMap<'a, F>) -> sqlx::Result<T>
-    where
-      F: FnMut(sqlx::postgres::PgRow) -> Result<T, Error> + Send,
-      T: Unpin + Send,
-  {
-    choose_executor!(self, query, fetch_one)
-  }
+  define_query_method!{fetch_one, T}
+  define_query_method!{fetch_all, Vec<T>}
+  define_query_method!{fetch_optional, Option<T>}
 
-  pub async fn fetch_all<'a, T, F>(&self, query: PgMap<'a, F>) -> sqlx::Result<Vec<T>>
-    where
-      F: FnMut(PgRow) -> Result<T, Error> + Send,
-      T: Unpin + Send,
-  {
-    choose_executor!(self, query, fetch_all)
-  }
-
-  pub async fn fetch_optional<'a, T, F>(&self, query: PgMap<'a, F>) -> sqlx::Result<Option<T>>
-    where
-      F: FnMut(PgRow) -> Result<T, Error> + Send,
-      T: Unpin + Send,
-  {
-    choose_executor!(self, query, fetch_optional)
-  }
-
-  pub async fn fetch_one_scalar<'a, T>(&self, query: PgQueryScalar<'a, T>) -> sqlx::Result<T>
-    where
-      (T,): for<'r> sqlx::FromRow<'r, PgRow>,
-      T: Unpin + Send,
-  {
-    choose_executor!(self, query, fetch_one)
-  }
+  define_query_scalar_method!{fetch_one_scalar, fetch_one, T}
+  define_query_scalar_method!{fetch_all_scalar, fetch_all, Vec<T>}
+  define_query_scalar_method!{fetch_optional_scalar, fetch_optional, Option<T>}
 
   pub async fn commit(&self) -> sqlx::Result<()> {
     if let Some(arc) = self.transaction.as_ref() {
