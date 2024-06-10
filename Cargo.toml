@@ -3,4 +3,4 @@ members = [
   "sqlx-models-derive",
   "sqlx-models-orm",
 ]
-
+resolver="2"

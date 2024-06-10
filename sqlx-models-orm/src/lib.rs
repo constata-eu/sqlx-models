@@ -1,6 +1,7 @@
 pub use sqlx_models_derive::model;
 pub use async_trait::async_trait;
 pub use sqlx;
+use std::ops::DerefMut;
 
 pub trait SqlxModel: Send + Sync + Sized {
   type State: Send + Sync;
@@ -52,7 +53,7 @@ macro_rules! choose_executor {
     if let Some(a) = $self.transaction.as_ref() {
       let mut mutex = a.lock().await;
       if let Some(tx) = &mut *mutex {
-        return $query.$method(&mut *tx).await;
+        return $query.$method(tx.deref_mut()).await;
       }
     }
     $query.$method(&$self.pool).await
