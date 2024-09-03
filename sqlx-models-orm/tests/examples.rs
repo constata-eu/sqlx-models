@@ -709,6 +709,18 @@ async fn tutorial() -> anyhow::Result<()> {
   assert_eq!(1, db.fetch_one(sqlx::query!("select id from humans order by id")).await?.id);
   assert_eq!(5, db.fetch_all(sqlx::query!("select id from cats")).await?.len());
 
+  /* If you're not sure if a row is there, you can insert it doing nothing if there's a conflict */
+  app.cat()
+    .insert(("original_cat", Personality::Active, Some(bob.attrs.id)).into())
+    .save().await?;
+  // This copy-cat will fail
+  assert!(app.cat().insert(("original_cat", Personality::Active, Some(bob.attrs.id)).into()).save().await.is_err());
+  // This one will not
+  assert!(app.cat().insert(("original_cat", Personality::Active, Some(bob.attrs.id)).into()).save_no_conflict().await.is_ok());
+
+  /* Items can be locked for update too */
+  app.cat().find_for_update(&"original_cat".to_string()).await?;
+
   Ok(())
 }
 

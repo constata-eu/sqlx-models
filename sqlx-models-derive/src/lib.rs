@@ -621,6 +621,16 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
     offset_field_pos,
   ), span);
 
+  let query_for_find_for_update = LitStr::new(&format!(
+    "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT ${} OFFSET ${} FOR UPDATE",
+    &conf.sql_select_columns,
+    table_name,
+    where_clauses.join(" AND "),
+    query_for_find_sort_criteria,
+    limit_field_pos,
+    offset_field_pos,
+  ), span);
+
   let query_for_count = LitStr::new(&format!(
     r#"SELECT count(*) as "count!" FROM {} WHERE {}"#,
     table_name,
@@ -635,6 +645,10 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
 
       pub async fn find<T: std::borrow::Borrow<#id_type>>(&self, id: T) -> sqlx::Result<#struct_name> {
         self.select().id_eq(id.borrow()).one().await
+      }
+
+      pub async fn find_for_update<T: std::borrow::Borrow<#id_type>>(&self, id: T) -> sqlx::Result<#struct_name> {
+        self.select().id_eq(id.borrow()).one_for_update().await
       }
 
       pub async fn find_optional<T: std::borrow::Borrow<#id_type>>(&self, id: T) -> sqlx::Result<Option<#struct_name>> {
@@ -741,7 +755,6 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
         }
       )*
 
-
       pub fn use_struct(mut self, value: #select_attrs_struct) -> Self {
         #(self.#comparison_idents = value.#comparison_idents;)*
         self.order_by = value.order_by;
@@ -756,12 +769,22 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
         Ok(attrs.into_iter().map(|a| self.resource(a) ).collect())
       }
 
+      pub async fn all_for_update(&self) -> sqlx::Result<Vec<#struct_name>> {
+        let attrs = self.state.db.fetch_all(sqlx::query_as!(#attrs_struct, #query_for_find_for_update, #(#args),*)).await?;
+        Ok(attrs.into_iter().map(|a| self.resource(a) ).collect())
+      }
+
       pub async fn count(&self) -> sqlx::Result<i64> {
         self.state.db.fetch_one_scalar(sqlx::query_scalar!(#query_for_count, #(#args_for_count),*)).await
       }
 
       pub async fn one(&self) -> sqlx::Result<#struct_name> {
         let attrs = self.state.db.fetch_one(sqlx::query_as!(#attrs_struct, #query_for_find, #(#args),*)).await?;
+        Ok(self.resource(attrs))
+      }
+
+      pub async fn one_for_update(&self) -> sqlx::Result<#struct_name> {
+        let attrs = self.state.db.fetch_one(sqlx::query_as!(#attrs_struct, #query_for_find_for_update, #(#args),*)).await?;
         Ok(self.resource(attrs))
       }
 
@@ -943,6 +966,15 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
     &conf.sql_select_columns,
   ), span);
 
+  let query_for_insert_no_conflict = LitStr::new(&format!(
+    "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT (id) DO UPDATE SET id = {}.id RETURNING {}",
+    table_name,
+    column_names_to_insert,
+    column_names_to_insert_positions,
+    table_name,
+    &conf.sql_select_columns,
+  ), span);
+
   quote!{
     impl #hub_struct {
       pub fn insert(&self, attrs: #insert_attrs_struct) -> #insert_struct {
@@ -980,6 +1012,18 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
           sqlx::query_as!(
             #attrs_struct,
             #query_for_insert,
+            #(&self.attrs.#fields_for_insert_idents as &#fields_for_insert_types),*
+          )
+        ).await?;
+
+        Ok(#struct_name::new(self.state.clone(), attrs))
+      }
+
+      pub async fn save_no_conflict(self) -> std::result::Result<#struct_name, sqlx::Error> {
+        let attrs = self.state.db.fetch_one(
+          sqlx::query_as!(
+            #attrs_struct,
+            #query_for_insert_no_conflict,
             #(&self.attrs.#fields_for_insert_idents as &#fields_for_insert_types),*
           )
         ).await?;

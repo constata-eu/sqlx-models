@@ -1,6 +1,6 @@
 [package]
 name = "sqlx-models-orm"
-version = "0.7.4"
+version = "0.7.5"
 edition = "2021"
 
 authors = ["Nubis <nubis@constata.eu>"]
