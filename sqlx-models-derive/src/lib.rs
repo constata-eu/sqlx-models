@@ -916,7 +916,7 @@ fn build_queries(conf: &SqlxModelConf) -> Vec<TokenStream2> {
 }
 
 fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
-  let span = conf.struct_name.span().clone();
+  let span = conf.struct_name.span();
   let state_name = &conf.state_name;
   let struct_name = &conf.struct_name;
   let hub_struct = &conf.hub_struct;
@@ -925,7 +925,7 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
   let extra_struct_attributes = &conf.extra_struct_attributes;
 
   let fields_for_insert: Vec<Field> = conf.fields.clone().into_iter().filter(|field|{
-    match field.attrs.iter().filter(|a| a.path == parse_str("sqlx_model_hints").unwrap() ).next() {
+    match field.attrs.iter().find(|a| a.path == parse_str("sqlx_model_hints").unwrap() ) {
       None => true,
       Some(found) => {
         let hint: ModelHints = found.parse_args().unwrap();
@@ -977,12 +977,14 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
 
   quote!{
     impl #hub_struct {
+      #[must_use = "don't forget to save your insert"]
       pub fn insert(&self, attrs: #insert_attrs_struct) -> #insert_struct {
         #insert_struct::new(self.state.clone(), attrs)
       }
     }
 
     #[derive(Clone)]
+    #[must_use="don't forget to save() your insert"]
     pub struct #insert_struct {
       pub state: #state_name,
       pub attrs: #insert_attrs_struct,
@@ -1054,7 +1056,7 @@ fn build_insert(conf: &SqlxModelConf) -> TokenStream2 {
 }
 
 fn build_update(conf: &SqlxModelConf) -> TokenStream2 {
-  let span = conf.struct_name.span().clone();
+  let span = conf.struct_name.span();
   let state_name = &conf.state_name;
   let struct_name = &conf.struct_name;
   let table_name = &conf.table_name;
@@ -1105,11 +1107,13 @@ fn build_update(conf: &SqlxModelConf) -> TokenStream2 {
 
   quote!{
     impl #struct_name {
+      #[must_use = "don't forget to save your update"]
       pub fn update(self) -> #update_struct {
         #update_struct::new(self.state, self.attrs.id)
       }
     }
     
+    #[must_use = "don't forget to save your update"]
     pub struct #update_struct {
       pub state: #state_name,
       pub attrs: #update_attrs_struct,
@@ -1157,7 +1161,7 @@ fn build_update(conf: &SqlxModelConf) -> TokenStream2 {
 fn build_delete(conf: &SqlxModelConf) -> TokenStream2 {
   let struct_name = &conf.struct_name;
   let table_name = &conf.table_name;
-  let span = conf.struct_name.span().clone();
+  let span = conf.struct_name.span();
 
   let query_for_delete = LitStr::new(&format!("DELETE FROM {} WHERE id = $1", table_name), span);
 
