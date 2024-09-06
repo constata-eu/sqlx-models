@@ -299,18 +299,20 @@ fn build_base(conf: &SqlxModelConf) -> TokenStream2 {
         let field = conf
             .fields
             .iter()
-            .find(|&x| x.ident.as_ref().unwrap().to_string() == c.column_name.to_string())
-            .expect(&format!(
-                "Belongs to column {:?} is not a field",
-                c.column_name.to_string()
-            ));
+            .find(|x| *x.ident.as_ref().unwrap() == c.column_name)
+            .unwrap_or_else(|| {
+                panic!(
+                    "Belongs to column {:?} is not a field",
+                    c.column_name.to_string()
+                )
+            });
 
         let is_option = if let Type::Path(TypePath {
             path: Path { segments, .. },
             ..
         }) = &field.ty
         {
-            segments[0].ident.to_string() == "Option"
+            segments[0].ident == "Option"
         } else {
             false
         };
@@ -943,7 +945,7 @@ fn build_queries(conf: &SqlxModelConf) -> Vec<TokenStream2> {
     let hub_struct = &conf.hub_struct;
     let table_name = &conf.table_name;
     let attrs_struct = &conf.attrs_struct;
-    let span = conf.struct_name.span().clone();
+    let span = conf.struct_name.span();
 
     conf.queries.iter().map(|q|{
     let method_name = q.method_name.clone();
