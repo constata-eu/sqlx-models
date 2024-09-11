@@ -962,6 +962,12 @@ fn build_queries(conf: &SqlxModelConf) -> Vec<TokenStream2> {
       sql.value()
     ), span);
 
+    let query_for_count = LitStr::new(&format!(
+      r#"SELECT count(*) as "count!" FROM {} WHERE {}"#,
+      table_name,
+      sql.value()
+    ), span);
+
     quote!{
       pub struct #query_struct_name {
         state: #state_name,
@@ -987,9 +993,14 @@ fn build_queries(conf: &SqlxModelConf) -> Vec<TokenStream2> {
           let attrs = self.state.db.fetch_optional(sqlx::query_as!(#attrs_struct, #query, #(&self.#arg_names as &#arg_types),*)).await?;
           Ok(attrs.map(|a| self.init(a)))
         }
+
+        pub async fn count(&self) -> sqlx::Result<i64> {
+          self.state.db.fetch_one_scalar(sqlx::query_scalar!(#query_for_count, #(&self.#arg_names as &#arg_types),*)).await
+        }
       }
 
       impl #hub_struct {
+        #[allow(clippy::too_many_arguments)]
         pub fn #method_name(&self, #args) -> #query_struct_name {
           #query_struct_name{ state: self.state.clone(), #(#arg_names,)* }
         }

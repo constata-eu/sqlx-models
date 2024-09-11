@@ -545,11 +545,12 @@ async fn tutorial() -> anyhow::Result<()> {
         assert_vec!(matches, bob);
     }
 
-    /* The one() and optional() methods are also available */
+    /* The one() and optional() and count() methods are also available */
     {
         let query = app.human().people_whose_toys_are_used_by_strays();
         assert_eq!(query.one().await?, alice);
         assert_eq!(query.optional().await?.as_ref(), Some(&alice));
+        assert_eq!(query.count().await?, 1);
     }
 
     /*
