@@ -963,7 +963,7 @@ fn build_queries(conf: &SqlxModelConf) -> Vec<TokenStream2> {
     ), span);
 
     let query_for_count = LitStr::new(&format!(
-      r#"SELECT count(*) as "count!" FROM {} WHERE {}"#,
+      r#"SELECT count(*) as "count!" FROM (SELECT 1 FROM {} WHERE {})"#,
       table_name,
       sql.value()
     ), span);
