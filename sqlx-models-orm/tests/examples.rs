@@ -325,13 +325,6 @@ async fn tutorial() -> anyhow::Result<()> {
         Chaotic,
     }
 
-    /* Deriving sqlx::Type for custom types is not enough, you'll want to do this too */
-    impl sqlx::postgres::PgHasArrayType for Personality {
-        fn array_type_info() -> sqlx::postgres::PgTypeInfo {
-            sqlx::postgres::PgTypeInfo::with_name("_Personality")
-        }
-    }
-
     /*
       The InsertCatHub struct takes care of saving.
       You can do validations or before/after save hooks in it.
