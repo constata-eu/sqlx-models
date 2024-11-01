@@ -1,6 +1,6 @@
 [package]
 name = "sqlx-models-orm"
-version = "0.7.10"
+version = "0.8.2"
 edition = "2021"
 
 authors = ["Nubis <nubis@constata.eu>"]
@@ -13,9 +13,9 @@ keywords = ["sqlx", "postgres", "orm", "activerecord"]
 categories = ["database"]
 
 [dependencies]
-sqlx-models-derive = { version = "0.7.10", path = "../sqlx-models-derive" }
+sqlx-models-derive = { version = "0.8.2", path = "../sqlx-models-derive" }
 async-trait = "0.1.52"
-sqlx = { version = "0.7.4", features = [ "postgres", "runtime-tokio", "tls-rustls", "migrate", "chrono", "json", "rust_decimal" ] }
+sqlx = { version = "0.8.2", features = [ "postgres", "runtime-tokio", "tls-rustls", "migrate", "chrono", "json", "rust_decimal" ] }
 futures-core = "^0.3.19"
 futures-util = "^0.3.19"
 
