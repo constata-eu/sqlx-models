@@ -17,6 +17,9 @@ mod kw {
     syn::custom_keyword!(has_many);
     syn::custom_keyword!(belongs_to);
     syn::custom_keyword!(default);
+    syn::custom_keyword!(no_update);
+    syn::custom_keyword!(no_insert);
+    syn::custom_keyword!(no_delete);
 }
 
 #[derive(Debug)]
@@ -100,13 +103,92 @@ impl Parse for ModelConfig {
 struct ModelHints {
     ty: Ident,
     default: bool,
+    op_ne: bool,
+    op_gt: bool,
+    op_gte: bool,
+    op_lt: bool,
+    op_lte: bool,
+    op_like: bool,
+    op_not_like: bool,
+    op_ilike: bool,
+    op_not_ilike: bool,
+    op_similar_to: bool,
+    op_not_similar_to: bool,
+    op_in: bool,
+    op_not_in: bool,
+    op_is_set: bool,
 }
 
 impl Parse for ModelHints {
     fn parse(input: ParseStream) -> Result<Self> {
         let ty: Ident = input.parse()?;
-        let default = input.parse::<Token![,]>().is_ok() && input.parse::<kw::default>().is_ok();
-        Ok(ModelHints { ty, default })
+
+        let mut hints = ModelHints {
+            ty,
+            default: false,
+            op_ne: false,
+            op_gt: false,
+            op_gte: false,
+            op_lt: false,
+            op_lte: false,
+            op_like: false,
+            op_not_like: false,
+            op_ilike: false,
+            op_not_ilike: false,
+            op_similar_to: false,
+            op_not_similar_to: false,
+            op_in: false,
+            op_not_in: false,
+            op_is_set: false,
+        };
+
+        while !input.is_empty() {
+            // Consume a comma if there are more tokens
+            if input.peek(Token![,]) {
+                input.parse::<Token![,]>()?;
+            } else {
+                break;
+            }
+
+            match input.parse::<Ident>()?.to_string().as_str() {
+                "default" => hints.default = true,
+                "all_ops" => {
+                    hints.op_ne = true;
+                    hints.op_gt = true;
+                    hints.op_gte = true;
+                    hints.op_lt = true;
+                    hints.op_lte = true;
+                    hints.op_like = true;
+                    hints.op_not_like = true;
+                    hints.op_ilike = true;
+                    hints.op_not_ilike = true;
+                    hints.op_similar_to = true;
+                    hints.op_not_similar_to = true;
+                    hints.op_in = true;
+                    hints.op_not_in = true;
+                    hints.op_is_set = true;
+                }
+                "op_ne" => hints.op_ne = true,
+                "op_gt" => hints.op_gt = true,
+                "op_gte" => hints.op_gte = true,
+                "op_lt" => hints.op_lt = true,
+                "op_lte" => hints.op_lte = true,
+                "op_like" => hints.op_like = true,
+                "op_not_like" => hints.op_not_like = true,
+                "op_ilike" => hints.op_ilike = true,
+                "op_not_ilike" => hints.op_not_ilike = true,
+                "op_similar_to" => hints.op_similar_to = true,
+                "op_not_similar_to" => hints.op_not_similar_to = true,
+                "op_in" => hints.op_in = true,
+                "op_not_in" => hints.op_not_in = true,
+                "op_is_set" => hints.op_is_set = true,
+                other => {
+                    panic!("Unknown flag for field {other}")
+                }
+            }
+        }
+
+        Ok(hints)
     }
 }
 
@@ -126,6 +208,9 @@ struct SqlxModelConf {
     sql_select_columns: String,
     field_idents: Vec<Ident>,
     hub_builder_method: Ident,
+    no_update: bool,
+    no_insert: bool,
+    no_delete: bool,
 }
 
 impl Parse for SqlxModelConf {
@@ -138,6 +223,31 @@ impl Parse for SqlxModelConf {
         input.parse::<Token![:]>()?;
         let table_name: Ident = input.parse()?;
         input.parse::<Token![,]>()?;
+
+        let no_update = if input.peek(kw::no_update) {
+            input.parse::<kw::no_update>()?;
+            input.parse::<Token![,]>()?;
+            true
+        } else {
+            false
+        };
+
+        let no_insert = if input.peek(kw::no_insert) {
+            input.parse::<kw::no_insert>()?;
+            input.parse::<Token![,]>()?;
+            true
+        } else {
+            false
+        };
+
+        let no_delete = if input.peek(kw::no_delete) {
+            input.parse::<kw::no_delete>()?;
+            input.parse::<Token![,]>()?;
+            true
+        } else {
+            false
+        };
+
         let whole_struct: ItemStruct = input.parse()?;
 
         let struct_name: Ident = whole_struct.ident.clone();
@@ -212,6 +322,9 @@ impl Parse for SqlxModelConf {
             sql_select_columns,
             field_idents,
             hub_builder_method,
+            no_update,
+            no_insert,
+            no_delete,
         })
     }
 }
@@ -225,9 +338,21 @@ pub fn model(tokens: TokenStream) -> TokenStream {
 
     let base_section = build_base(&conf);
     let select_section = build_select(&conf);
-    let insert_section = build_insert(&conf);
-    let update_section = build_update(&conf);
-    let delete_section = build_delete(&conf);
+    let insert_section = if conf.no_insert {
+        quote! {}
+    } else {
+        build_insert(&conf)
+    };
+    let update_section = if conf.no_update {
+        quote! {}
+    } else {
+        build_update(&conf)
+    };
+    let delete_section = if conf.no_delete {
+        quote! {}
+    } else {
+        build_delete(&conf)
+    };
     let queries_section = build_queries(&conf);
 
     let quoted = quote! {
@@ -532,45 +657,69 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
             let db_type = hints.ty.to_string();
             let mut field_position = args.len();
 
-            let mut comparisons = vec![
-                (format_ident!("{}_eq", ident), "=", &flat_ty, true),
-                (format_ident!("{}_ne", ident), "!=", &flat_ty, true),
-                (format_ident!("{}_gt", ident), ">", &flat_ty, true),
-                (format_ident!("{}_gte", ident), ">=", &flat_ty, true),
-                (format_ident!("{}_lt", ident), "<", &flat_ty, true),
-                (format_ident!("{}_lte", ident), "<=", &flat_ty, true),
-            ];
+            let mut comparisons = vec![(format_ident!("{}_eq", ident), "=", &flat_ty, true)];
+
+            if hints.op_ne {
+                comparisons.push((format_ident!("{}_ne", ident), "!=", &flat_ty, true));
+            }
+            if hints.op_gt {
+                comparisons.push((format_ident!("{}_gt", ident), ">", &flat_ty, true));
+            }
+            if hints.op_gte {
+                comparisons.push((format_ident!("{}_gte", ident), ">=", &flat_ty, true));
+            }
+            if hints.op_lt {
+                comparisons.push((format_ident!("{}_lt", ident), "<", &flat_ty, true));
+            }
+            if hints.op_lte {
+                comparisons.push((format_ident!("{}_lte", ident), "<=", &flat_ty, true));
+            }
 
             let string_ty: syn::Type = syn::parse_quote! { String };
             if &db_type == "varchar" || &db_type == "text" {
-                comparisons.append(&mut vec![
-                    (format_ident!("{}_like", ident), "LIKE", &string_ty, false),
-                    (
+                if hints.op_like {
+                    comparisons.push((format_ident!("{}_like", ident), "LIKE", &string_ty, false));
+                }
+                if hints.op_not_like {
+                    comparisons.push((
                         format_ident!("{}_not_like", ident),
                         "NOT LIKE",
                         &string_ty,
                         false,
-                    ),
-                    (format_ident!("{}_ilike", ident), "ILIKE", &string_ty, false),
-                    (
+                    ));
+                }
+                if hints.op_ilike {
+                    comparisons.push((
+                        format_ident!("{}_ilike", ident),
+                        "ILIKE",
+                        &string_ty,
+                        false,
+                    ));
+                }
+                if hints.op_not_ilike {
+                    comparisons.push((
                         format_ident!("{}_not_ilike", ident),
                         "NOT ILIKE",
                         &string_ty,
                         false,
-                    ),
-                    (
+                    ));
+                }
+                if hints.op_similar_to {
+                    comparisons.push((
                         format_ident!("{}_similar_to", ident),
                         "SIMILAR TO",
                         &string_ty,
                         false,
-                    ),
-                    (
+                    ));
+                }
+                if hints.op_not_similar_to {
+                    comparisons.push((
                         format_ident!("{}_not_similar_to", ident),
                         "NOT SIMILAR TO",
                         &string_ty,
                         false,
-                    ),
-                ]);
+                    ));
+                }
             }
 
             for (comparison_ident, operator, rust_type, simple_builder) in comparisons.into_iter() {
@@ -598,10 +747,17 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
             }
 
             let vec_of_ty: syn::Type = syn::parse_quote! { Vec<#flat_ty> };
-            let field_in_comparisons = vec![
-                (format_ident!("{}_in", ident), "IN", &vec_of_ty),
-                (format_ident!("{}_not_in", ident), "NOT IN", &vec_of_ty),
-            ];
+            let mut field_in_comparisons = vec![];
+            if hints.op_in {
+                field_in_comparisons.push((format_ident!("{}_in", ident), "IN", &vec_of_ty));
+            }
+            if hints.op_not_in {
+                field_in_comparisons.push((
+                    format_ident!("{}_not_in", ident),
+                    "NOT IN",
+                    &vec_of_ty,
+                ));
+            }
 
             for (comparison_ident, operator, rust_type) in field_in_comparisons.into_iter() {
                 comparison_idents.push(comparison_ident.clone());
@@ -623,24 +779,26 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
                 builder_method_simple_types.push(rust_type.clone());
             }
 
-            field_position += 1;
-            let is_set_field_ident = format_ident!("{}_is_set", ident);
-            let bool_type: syn::Type = syn::parse_quote! { bool };
-            comparison_idents.push(is_set_field_ident.clone());
-            comparison_types.push(bool_type.clone());
-            where_clauses.push(
-        format!(
-          "(${}::boolean IS NULL OR ((${}::boolean AND {} IS NOT NULL) OR (NOT ${}::boolean AND {} IS NULL)))",
-          field_position,
-          field_position,
-          &ident,
-          field_position,
-          &ident,
-        )
-      );
-            args.push(quote! { self.#is_set_field_ident });
-            builder_method_simple_idents.push(is_set_field_ident.clone());
-            builder_method_simple_types.push(bool_type);
+            if hints.op_is_set {
+                field_position += 1;
+                let is_set_field_ident = format_ident!("{}_is_set", ident);
+                let bool_type: syn::Type = syn::parse_quote! { bool };
+                comparison_idents.push(is_set_field_ident.clone());
+                comparison_types.push(bool_type.clone());
+                where_clauses.push(
+                    format!(
+                      "(${}::boolean IS NULL OR ((${}::boolean AND {} IS NOT NULL) OR (NOT ${}::boolean AND {} IS NULL)))",
+                      field_position,
+                      field_position,
+                      &ident,
+                      field_position,
+                      &ident,
+                    )
+                );
+                args.push(quote! { self.#is_set_field_ident });
+                builder_method_simple_idents.push(is_set_field_ident.clone());
+                builder_method_simple_types.push(bool_type);
+            }
         };
     }
 
