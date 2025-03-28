@@ -1,6 +1,6 @@
 [package]
 name = "sqlx-models-derive"
-version = "0.8.4"
+version = "0.8.5"
 edition = "2021"
 authors = ["Nubis <nubis@constata.eu>"]
 rust-version = "1.56"
