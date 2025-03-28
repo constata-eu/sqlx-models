@@ -103,11 +103,11 @@ async fn tutorial() -> anyhow::Result<()> {
       */
       #[serde_as]
       struct Human {
-        #[sqlx_model_hints(int4, default)]
+        #[sqlx_model_hints(int4, default, op_in, op_not_in)]
         id: i32,
-        #[sqlx_model_hints(varchar)]
+        #[sqlx_model_hints(varchar, op_like, op_not_like, op_ilike, op_not_ilike, op_similar_to, op_not_similar_to)]
         name: String,
-        #[sqlx_model_hints(int4)]
+        #[sqlx_model_hints(int4, op_is_set, op_ne, op_lt, op_lte, op_gt, op_gte)]
         age: Option<i32>,
         #[sqlx_model_hints(boolean, default)]
         is_allowed_unlimited_cats: bool,
@@ -302,9 +302,9 @@ async fn tutorial() -> anyhow::Result<()> {
       state: App,
       table: cats,
       struct Cat {
-        #[sqlx_model_hints(varchar)]
+        #[sqlx_model_hints(varchar, op_ne)]
         id: String,
-        #[sqlx_model_hints(Personality)]
+        #[sqlx_model_hints(Personality, op_in)]
         personality: Personality,
         #[sqlx_model_hints(int4)]
         human_id: Option<i32>,
@@ -427,7 +427,7 @@ async fn tutorial() -> anyhow::Result<()> {
       struct CatToy {
         #[sqlx_model_hints(int4, default)]
         id: i32,
-        #[sqlx_model_hints(varchar)]
+        #[sqlx_model_hints(varchar, op_ne)]
         cat_id: String,
         #[sqlx_model_hints(int4)]
         toy_id: i32,

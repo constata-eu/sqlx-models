@@ -749,12 +749,12 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
             let vec_of_ty: syn::Type = syn::parse_quote! { Vec<#flat_ty> };
             let mut field_in_comparisons = vec![];
             if hints.op_in {
-                field_in_comparisons.push((format_ident!("{}_in", ident), "IN", &vec_of_ty));
+                field_in_comparisons.push((format_ident!("{}_in", ident), "= ANY", &vec_of_ty));
             }
             if hints.op_not_in {
                 field_in_comparisons.push((
                     format_ident!("{}_not_in", ident),
-                    "NOT IN",
+                    "<> ALL",
                     &vec_of_ty,
                 ));
             }
@@ -763,7 +763,7 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
                 comparison_idents.push(comparison_ident.clone());
                 comparison_types.push(rust_type.clone());
                 where_clauses.push(format!(
-                    "(NOT ${}::boolean OR {} {} (SELECT unnest(CAST(${} as {}[]))) )",
+                    "(NOT ${}::boolean OR {} {}(CAST(${} as {}[])) )",
                     field_position + 1,
                     &ident,
                     operator,

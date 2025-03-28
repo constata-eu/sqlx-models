@@ -1738,7 +1738,7 @@ dependencies = [
 
 [[package]]
 name = "sqlx-models-derive"
-version = "0.8.2"
+version = "0.8.4"
 dependencies = [
  "convert_case",
  "quote",
@@ -1747,7 +1747,7 @@ dependencies = [
 
 [[package]]
 name = "sqlx-models-orm"
-version = "0.8.2"
+version = "0.8.4"
 dependencies = [
  "anyhow",
  "async-trait",
