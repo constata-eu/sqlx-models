@@ -878,6 +878,32 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
         span,
     );
 
+    let hub_find_for_update = if conf.no_update {
+        quote! {}
+    } else {
+        quote! {
+          pub async fn find_for_update<T: std::borrow::Borrow<#id_type>>(&self, id: T) -> sqlx::Result<#struct_name> {
+            self.select().id_eq(id.borrow()).one_for_update().await
+          }
+        }
+    };
+
+    let select_for_update_methods = if conf.no_update {
+        quote! {}
+    } else {
+        quote! {
+          pub async fn all_for_update(&self) -> sqlx::Result<Vec<#struct_name>> {
+            let attrs = self.state.db.fetch_all(sqlx::query_as!(#attrs_struct, #query_for_find_for_update, #(#args),*)).await?;
+            Ok(attrs.into_iter().map(|a| self.resource(a) ).collect())
+          }
+
+          pub async fn one_for_update(&self) -> sqlx::Result<#struct_name> {
+            let attrs = self.state.db.fetch_one(sqlx::query_as!(#attrs_struct, #query_for_find_for_update, #(#args),*)).await?;
+            Ok(self.resource(attrs))
+          }
+        }
+    };
+
     quote! {
       impl #hub_struct {
         pub fn select(&self) -> #select_struct {
@@ -888,9 +914,7 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
           self.select().id_eq(id.borrow()).one().await
         }
 
-        pub async fn find_for_update<T: std::borrow::Borrow<#id_type>>(&self, id: T) -> sqlx::Result<#struct_name> {
-          self.select().id_eq(id.borrow()).one_for_update().await
-        }
+        #hub_find_for_update
 
         pub async fn find_optional<T: std::borrow::Borrow<#id_type>>(&self, id: T) -> sqlx::Result<Option<#struct_name>> {
           self.select().id_eq(id.borrow()).optional().await
@@ -1010,10 +1034,7 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
           Ok(attrs.into_iter().map(|a| self.resource(a) ).collect())
         }
 
-        pub async fn all_for_update(&self) -> sqlx::Result<Vec<#struct_name>> {
-          let attrs = self.state.db.fetch_all(sqlx::query_as!(#attrs_struct, #query_for_find_for_update, #(#args),*)).await?;
-          Ok(attrs.into_iter().map(|a| self.resource(a) ).collect())
-        }
+        #select_for_update_methods
 
         pub async fn count(&self) -> sqlx::Result<i64> {
           self.state.db.fetch_one_scalar(sqlx::query_scalar!(#query_for_count, #(#args_for_count),*)).await
@@ -1021,11 +1042,6 @@ fn build_select(conf: &SqlxModelConf) -> TokenStream2 {
 
         pub async fn one(&self) -> sqlx::Result<#struct_name> {
           let attrs = self.state.db.fetch_one(sqlx::query_as!(#attrs_struct, #query_for_find, #(#args),*)).await?;
-          Ok(self.resource(attrs))
-        }
-
-        pub async fn one_for_update(&self) -> sqlx::Result<#struct_name> {
-          let attrs = self.state.db.fetch_one(sqlx::query_as!(#attrs_struct, #query_for_find_for_update, #(#args),*)).await?;
           Ok(self.resource(attrs))
         }
 
